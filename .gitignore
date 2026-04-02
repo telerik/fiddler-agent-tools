@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# MCP config files (contain API keys)
+.vscode/mcp.json
+.cursor/mcp.json
+.mcp.json
+
+# Editor
+.vscode/settings.json
+*.swp
+*~
