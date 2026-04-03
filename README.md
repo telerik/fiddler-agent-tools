@@ -19,6 +19,53 @@ Skills are instruction files that teach coding agents (GitHub Copilot, Claude Co
 | [`fiddler-mcp-setup`](skills/fiddler-mcp-setup/SKILL.md) | Connect your agent to the Fiddler Everywhere MCP server. Use this when Fiddler tools aren't available in your agent session. |
 | [`fiddler-feature-verification`](skills/fiddler-feature-verification/SKILL.md) | Verify that a feature's HTTP calls completed correctly by analyzing captured traffic, grouped by endpoint. |
 
+## Installation
+
+Clone this repository and copy the skill folders into your agent's skills directory.
+
+### Claude Code
+
+```bash
+# Clone the repo
+git clone https://github.com/nickolay-aspect/fiddler-agent-tools.git
+
+# Copy all skills into the Claude Code skills directory
+cp -r fiddler-agent-tools/skills/* ~/.claude/skills/
+```
+
+On Windows (PowerShell):
+```powershell
+Copy-Item -Recurse fiddler-agent-tools\skills\* "$env:USERPROFILE\.claude\skills\"
+```
+
+### GitHub Copilot (VS Code)
+
+Copy the skill folders into your VS Code user prompts directory:
+
+```bash
+cp -r fiddler-agent-tools/skills/* ~/.vscode/prompts/skills/
+```
+
+On Windows (PowerShell):
+```powershell
+Copy-Item -Recurse fiddler-agent-tools\skills\* "$env:APPDATA\Code\User\prompts\skills\"
+```
+
+### Cursor
+
+Copy the skill folders into the Cursor skills directory:
+
+```bash
+cp -r fiddler-agent-tools/skills/* ~/.cursor/skills/
+```
+
+On Windows (PowerShell):
+```powershell
+Copy-Item -Recurse fiddler-agent-tools\skills\* "$env:USERPROFILE\.cursor\skills\"
+```
+
+> **Note:** After copying, restart your agent or editor session so the new skills are detected.
+
 ## Prerequisites
 
 If you haven't set up Fiddler with your agent yet, start with the [`fiddler-mcp-setup`](skills/fiddler-mcp-setup/SKILL.md) skill or [`fiddler-download-setup`](skills/fiddler-download-setup/SKILL.md) if you don't have Fiddler installed at all.

@@ -1,12 +1,15 @@
-# macOS
+# OS
 .DS_Store
+Thumbs.db
+Desktop.ini
 
-# MCP config files (contain API keys)
-.vscode/mcp.json
-.cursor/mcp.json
+# Agent / MCP config directories (contain API keys)
+.claude/
+.cursor/
+.vscode/
 .mcp.json
 
-# Editor
-.vscode/settings.json
+# Editor swap / backup files
 *.swp
 *~
+*.bak
