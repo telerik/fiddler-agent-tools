@@ -35,6 +35,7 @@ cp -r fiddler-agent-tools/skills/* ~/.claude/skills/
 
 On Windows (PowerShell):
 ```powershell
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\skills\" | Out-Null
 Copy-Item -Recurse fiddler-agent-tools\skills\* "$env:USERPROFILE\.claude\skills\"
 ```
 
