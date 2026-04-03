@@ -62,6 +62,7 @@ cp -r fiddler-agent-tools/skills/* ~/.cursor/skills/
 
 On Windows (PowerShell):
 ```powershell
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.cursor\skills\" | Out-Null
 Copy-Item -Recurse fiddler-agent-tools\skills\* "$env:USERPROFILE\.cursor\skills\"
 ```
 
