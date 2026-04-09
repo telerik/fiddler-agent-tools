@@ -231,9 +231,16 @@ chmod +x ~/Downloads/FiddlerEverywhere.AppImage
 Start-Process "$env:USERPROFILE\Downloads\FiddlerEverywhere.exe" -ArgumentList "/S" -Wait
 ```
 
-macOS launch:
+**Launch Fiddler:**
+
+macOS:
 ```bash
-open /Applications/Fiddler\ Everywhere.app
+open -a "Fiddler Everywhere" && sleep 15
+```
+
+Linux:
+```bash
+(nohup fiddler-everywhere &>/dev/null &); sleep 15
 ```
 
 Windows:
