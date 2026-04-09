@@ -10,40 +10,72 @@ description: >
 
 # Fiddler Download & Setup
 
-Guide the user through downloading, installing, and launching Fiddler Everywhere — then
-automatically chain into MCP configuration so the agent can use Fiddler tools.
+Guide the user through downloading, installing, and launching Fiddler Everywhere.
 
 ## Operating rules
 
 1. This skill is shell-first. Fiddler is not installed yet, so no MCP tools are available.
 2. Resolve the current version from the manifest before constructing any download URL.
    Never hardcode a version number.
-
+3. On Windows if the opened terminal is not powershell or cmd - wrap and run the scripts with: pwsh -c 'script'.
 ---
 
 ## Phase 1 — Check if Fiddler is already installed
 
 Before downloading, check whether Fiddler Everywhere is already installed.
+If it is installed, also read the installed version and compare it against the latest
+available release. Only proceed to Phase 2 if the app is not installed or an update
+is available and the user wants to upgrade.
 
-### macOS
+### macOS — detect and version-check
 ```bash
 if [ -d "/Applications/Fiddler Everywhere.app" ]; then
-  echo "INSTALLED"
+  INSTALLED_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" \
+    "/Applications/Fiddler Everywhere.app/Contents/Info.plist" 2>/dev/null)
+  echo "INSTALLED: $INSTALLED_VERSION"
 else
   echo "NOT_INSTALLED"
 fi
 ```
 
-### Linux
+If `INSTALLED`, fetch the latest version for the detected architecture and compare:
 ```bash
-if command -v fiddler-everywhere &>/dev/null || ls ~/Downloads/FiddlerEverywhere.AppImage &>/dev/null; then
-  echo "INSTALLED"
+ARCH=$(uname -m)
+if [ "$ARCH" = "arm64" ]; then
+  MANIFEST_URL="https://downloads.getfiddler.com/mac-arm64/latest-mac.yml"
+else
+  MANIFEST_URL="https://downloads.getfiddler.com/mac/latest-mac.yml"
+fi
+LATEST_VERSION=$(curl -s "$MANIFEST_URL" | grep '^version:' | awk '{print $2}')
+echo "Installed: $INSTALLED_VERSION  |  Latest: $LATEST_VERSION"
+if [ "$INSTALLED_VERSION" = "$LATEST_VERSION" ]; then
+  echo "UP_TO_DATE"
+else
+  echo "UPDATE_AVAILABLE"
+fi
+```
+
+### Linux — detect and version-check
+```bash
+APPIMAGE=$(ls ~/Downloads/fiddler-everywhere-*.AppImage 2>/dev/null | sort -V | tail -1)
+if command -v fiddler-everywhere &>/dev/null || [ -n "$APPIMAGE" ]; then
+  # Extract version from AppImage filename as the most reliable source
+  INSTALLED_VERSION=$(echo "$APPIMAGE" | grep -oP '[\d]+\.[\d]+\.[\d]+')
+  echo "INSTALLED: $INSTALLED_VERSION"
+  LATEST_VERSION=$(curl -s "https://downloads.getfiddler.com/linux/latest-linux.yml" \
+    | grep '^version:' | awk '{print $2}')
+  echo "Installed: $INSTALLED_VERSION  |  Latest: $LATEST_VERSION"
+  if [ "$INSTALLED_VERSION" = "$LATEST_VERSION" ]; then
+    echo "UP_TO_DATE"
+  else
+    echo "UPDATE_AVAILABLE"
+  fi
 else
   echo "NOT_INSTALLED"
 fi
 ```
 
-### Windows (PowerShell)
+### Windows (PowerShell) — detect and version-check
 ```powershell
 $installed = Get-ItemProperty `
   "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
@@ -52,11 +84,29 @@ $installed = Get-ItemProperty `
   -ErrorAction SilentlyContinue |
   Where-Object { $_.DisplayName -like "*Fiddler Everywhere*" }
 
-if ($installed) { "INSTALLED" } else { "NOT_INSTALLED" }
+if ($installed) {
+  $installedVersion = $installed.DisplayVersion
+  Write-Host "INSTALLED: $installedVersion"
+
+  $manifest = Invoke-WebRequest "https://downloads.getfiddler.com/win/latest.yml" -UseBasicParsing
+  $text = [System.Text.Encoding]::UTF8.GetString($manifest.RawContentStream.ToArray())
+  $latestVersion = ($text | Select-String '(?m)^version:\s*(.+)').Matches.Groups[1].Value.Trim()
+  Write-Host "Installed: $installedVersion  |  Latest: $latestVersion"
+
+  if ($installedVersion -eq $latestVersion) { "UP_TO_DATE" } else { "UPDATE_AVAILABLE" }
+} else {
+  "NOT_INSTALLED"
+}
 ```
 
-If the output is `INSTALLED`, inform the user that Fiddler Everywhere is already
-installed and stop further execution of the skill.
+**Interpreting the result:**
+
+- `NOT_INSTALLED` — continue to Phase 2 to download and install.
+- `UP_TO_DATE` — inform the user their Fiddler Everywhere is already on the latest version
+  and stop further execution of the skill.
+- `UPDATE_AVAILABLE` — tell the user the installed version and the latest version, then ask
+  whether they want to upgrade. If yes, continue to Phase 2 (the new installer will replace
+  the existing one). If no, stop.
 ---
 
 ## Phase 2 — Detect OS and resolve version
@@ -186,7 +236,11 @@ macOS launch:
 open /Applications/Fiddler\ Everywhere.app
 ```
 
-Windows launch:
+Windows:
+**Important** On windows if the current terminal used in bash, tell the user app must be launched manually.
+Ask them to launch it and let them confirm when its launched. After confirmation, go to phase 5.
+
+(PowerShell):
 ```powershell
 $candidates = @(
   "$env:LOCALAPPDATA\Programs\Fiddler Everywhere\Fiddler Everywhere.exe",
@@ -195,13 +249,44 @@ $candidates = @(
 )
 $fiddlerExe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($fiddlerExe) {
-  Start-Process $fiddlerExe
-  Write-Host "Launched: $fiddlerExe"
-} else {
-  Write-Error "Could not find Fiddler Everywhere exe. Check installation completed successfully."
+  $cmdLine = '"' + $fiddlerExe + '"'
+  Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmdLine } | Out-Null
+  Start-Sleep 15
 }
 ```
 ---
+
+## Phase 5 — Suggest MCP setup
+
+After Fiddler Everywhere is installed and launched, inform the user that there is
+an automatic MCP setup skill that can configure the Fiddler MCP server connection.
+
+Present the following message:
+
+> Fiddler Everywhere is installed and running.
+>
+> There is an **automatic MCP setup** skill that can configure the Fiddler MCP
+> server connection for your AI agent. This will allow agent tools 
+> to interact with Fiddler directly — capturing traffic,
+> inspecting sessions, creating rules, and more — all from within your editor.
+>
+> Would you like me to auto-configure MCP now?
+
+Use the ask-questions tool to let the user choose:
+- **Yes, auto-configure MCP** (recommended)
+- **No, I'll set it up manually later**
+
+### If the user accepts
+
+Install the `fiddler-mcp-setup` skill from its remote location and invoke it:
+
+**Remote skill URL:** `https://github.com/telerik/fiddler-agent-tools/tree/master/skills/fiddler-mcp-setup`
+
+Follow the `fiddler-mcp-setup` skill instructions to complete MCP configuration end-to-end.
+
+### If the user declines
+
+Acknowledge and let them know they can download the MCP setup skill later at any time.
 
 ## Troubleshooting
 

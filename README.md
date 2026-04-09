@@ -6,6 +6,53 @@ These skills extend agents (GitHub Copilot, Claude Code, Cursor, Codex, etc.) wi
 
 Use these skills any time you want your AI coding agent to reason about real network traffic rather than relying on guesses or static code analysis alone.
 
+## Installation
+
+### Quick install (via [skills.sh](https://skills.sh))
+
+The fastest way to install all Fiddler skills is through the `skills` CLI — no manual file placement needed:
+
+```bash
+npx skills add telerik/fiddler-agent-tools
+```
+
+This automatically detects your agent and places the skill files in the correct directory.
+
+To install a single skill:
+
+```bash
+npx skills add telerik/fiddler-agent-tools/fiddler-mcp-setup
+npx skills add telerik/fiddler-agent-tools/fiddler-download-setup
+npx skills add telerik/fiddler-agent-tools/fiddler-feature-verification
+```
+
+### Manual setup
+
+If you prefer to install skills manually, clone this repository and copy the skill folders to the appropriate directory for your agent.
+
+```bash
+git clone https://github.com/telerik/fiddler-agent-tools.git
+```
+
+Then copy the contents of the `skills/` folder to the matching path:
+
+| Agent | Skills directory |
+|-------|-----------------|
+| **GitHub Copilot (VS Code)** | `~/.copilot/skills/` (macOS/Linux) · `%USERPROFILE%\.copilot\skills\` (Windows) |
+| **Cursor** | `~/.cursor/skills/` (macOS/Linux) · `%USERPROFILE%\.cursor\skills\` (Windows) |
+| **Claude Code** | `~/.claude/skills/` |
+| **Claude Desktop** | `~/.claude/skills/` |
+| **GitHub Copilot CLI** | `~/.copilot/skills/` |
+| **OpenAI Codex CLI** | `~/.codex/skills/` |
+
+For example, on macOS/Linux for GitHub Copilot in VS Code:
+
+```bash
+mkdir -p ~/.copilot/skills
+cp -r skills/* ~/.copilot/skills/
+```
+
+Each skill folder must contain its `SKILL.md` file. After copying, your agent will automatically detect and use the skills when a matching request is made.
 
 ## What are skills?
 

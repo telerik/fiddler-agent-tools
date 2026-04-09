@@ -20,11 +20,13 @@ inspection, status, and session APIs.
 ## Operating rules
 
 - **Shell-first.** MCP is not yet configured, so you cannot use MCP tools.
+- **Sequential execution only.** Follow steps strictly in order — do not run steps or scripts in parallel. Each step may depend on values produced by the previous one.
+- **Execute provided scripts directly** - do not modify or substitute the existing scripts.
+- **On Windows** - if the opened terminal is not powershell or cmd - wrap and run the scripts with: pwsh -c 'script'.
 - **`curl` only for Steps 3 through 5.** No other raw HTTP requests.
 - **The MCP path is always `/mcp`.** Do not attempt to discover or vary it.
-- **Direct path checks only** when detecting agent directories (e.g. `test -d .vscode`).
-  Never use recursive globs (`**`) or `rg`/`grep` without a scoped directory argument.
-- **Always gitignore the config file** — it contains the API key in plaintext.
+- **Direct path checks only** when detecting agent directories (e.g. `test -d .vscode`). 
+Never use recursive globs (`**`) or `rg`/`grep` without a scoped directory argument.
 
 ---
 
@@ -65,7 +67,65 @@ If `NOT_INSTALLED`: stop and tell the user:
 
 ### 2a — Detect the agent
 
-Identify the current agent environment. Use **direct path checks only**:
+Use a three-tier strategy. Stop at the first tier that yields exactly one match.
+
+#### Tier 1 — Environment variables (which agent is running this shell right now)
+
+macOS / Linux:
+```bash
+# VS Code / GitHub Copilot
+[ -n "$VSCODE_PID" ] || [ "$TERM_PROGRAM" = "vscode" ] && echo "vscode"
+# Cursor
+[ -n "$CURSOR_TRACE_ID" ] || [ "$TERM_PROGRAM" = "cursor" ] && echo "cursor"
+# Claude Code CLI
+[ -n "$CLAUDE_CODE_ENTRYPOINT" ] && echo "claude-code"
+# GitHub Copilot CLI
+[ -n "$GITHUB_COPILOT_CLI" ] && echo "copilot-cli"
+# OpenAI Codex CLI
+[ -n "$OPENAI_CODEX" ] && echo "codex"
+```
+
+Windows (PowerShell):
+```powershell
+if ($env:VSCODE_PID -or $env:TERM_PROGRAM -eq "vscode") { "vscode" }
+if ($env:CURSOR_TRACE_ID -or $env:TERM_PROGRAM -eq "cursor") { "cursor" }
+if ($env:CLAUDE_CODE_ENTRYPOINT) { "claude-code" }
+if ($env:GITHUB_COPILOT_CLI) { "copilot-cli" }
+if ($env:OPENAI_CODEX) { "codex" }
+```
+
+If exactly one result is printed, set `AGENT` to that value and skip to the mapping table.
+If more than one result is printed, proceed to Tier 2.
+If no results, proceed to Tier 2.
+
+> Claude Desktop does not inject env vars into child shells. If no env var matches, it may still be the active agent — check via Tier 3.
+
+#### Tier 2 — Parent process name (OS-portable, doesn't rely on documented env vars)
+
+macOS / Linux:
+```bash
+ps -p $PPID -o comm= 2>/dev/null
+```
+
+Windows (PowerShell):
+```powershell
+(Get-Process -Id (Get-CimInstance Win32_Process -Filter "ProcessId=$PID").ParentProcessId).Name
+```
+
+Match the output against known process names:
+
+| Process name contains | Agent |
+|-----------------------|-------|
+| `code`, `code-helper` | `vscode` |
+| `cursor` | `cursor` |
+| `claude` | `claude-code` |
+| `copilot` | `copilot-cli` |
+| `codex` | `codex` |
+
+If matched unambiguously, set `AGENT` and skip to the mapping table.
+If still ambiguous or unrecognised, proceed to Tier 3.
+
+#### Tier 3 — Filesystem markers (fallback only)
 
 ```bash
 test -f ~/.copilot/mcp-config.json && echo "copilot-cli"                                              # GitHub Copilot CLI
@@ -79,16 +139,23 @@ which copilot 2>/dev/null && echo "copilot-cli-in-path"                         
 which codex  2>/dev/null && echo "codex-in-path"                                                       # Codex CLI fallback
 ```
 
-| Agent detected | Set `AGENT=` | Set `CONFIG_FILE=` |
-|----------------|-------------|-------------------|
-| `copilot-cli` or `copilot-cli-in-path` | `copilot-cli` | `~/.copilot/mcp-config.json` |
-| `claude-code` | `claude-code` | `.mcp.json` |
+If **multiple** markers match, do **not** guess. Ask the user:
+> "Multiple agent environments were detected on this machine. Which one are you setting Fiddler MCP up for? (Claude Desktop, Claude Code CLI, GitHub Copilot CLI, VS Code / GitHub Copilot, Cursor, or OpenAI Codex CLI)"
+
+---
+
+#### Agent → config mapping
+
+| Agent | Set `AGENT=` | Set `CONFIG_FILE=` |
+|-------|-------------|-------------------|
+| `vscode` | `vscode` | `~/.config/Code/User/mcp.json` (macOS/Linux) or `%APPDATA%\Code\User\mcp.json` (Windows) |
+| `cursor` | `cursor` | `~/.cursor/mcp.json` (macOS/Linux) or `%APPDATA%\Cursor\User\mcp.json` (Windows) |
+| `claude-code` | `claude-code` | `~/.claude/mcp.json` |
 | `claude-desktop` | `claude-desktop` | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows) |
-| `vscode` | `vscode` | `.vscode/mcp.json` |
-| `cursor` | `cursor` | `.cursor/mcp.json` |
+| `copilot-cli` or `copilot-cli-in-path` | `copilot-cli` | `~/.copilot/mcp-config.json` |
 | `codex` or `codex-in-path` | `codex` | `~/.codex/config.toml` |
 
-If no markers match, ask:
+If no tier yields a match, ask:
 > "Which agent are you setting this up for? (Claude Desktop, Claude Code CLI, GitHub Copilot CLI, VS Code / GitHub Copilot, Cursor, or OpenAI Codex CLI)"
 
 Use the user's answer to set `AGENT` and `CONFIG_FILE`.
@@ -123,8 +190,6 @@ curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:8868/mcp" \
 
 Windows (PowerShell):
 ```powershell
-# Use curl.exe explicitly — 'curl' in PowerShell is an alias for Invoke-WebRequest
-# and does not support curl flags like -w or -o.
 curl.exe -s -o NUL -w "%{http_code}" -X POST "http://localhost:8868/mcp" `
   -H "Content-Type: application/json" `
   -H "Accept: application/json, text/event-stream" `
@@ -176,7 +241,11 @@ Linux:
 (nohup fiddler-everywhere &>/dev/null &); sleep 15
 ```
 
-Windows (PowerShell):
+Windows:
+**Important** On windows if the current terminal used in bash, tell the user app must be launched manually.
+Ask them to launch it and let them confirm when its launched. After confirmation, go to Step 4.
+
+(PowerShell):
 ```powershell
 $candidates = @(
   "$env:LOCALAPPDATA\Programs\Fiddler Everywhere\Fiddler Everywhere.exe",
@@ -184,8 +253,14 @@ $candidates = @(
   "C:\Program Files (x86)\Fiddler Everywhere\Fiddler Everywhere.exe"
 )
 $fiddlerExe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-if ($fiddlerExe) { cmd /c "start `"`" `"$fiddlerExe`""; Start-Sleep 15 }
+if ($fiddlerExe) {
+  $cmdLine = '"' + $fiddlerExe + '"'
+  Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmdLine } | Out-Null
+  Start-Sleep 15
+}
 ```
+
+**Important:** Wait 15 seconds for Fiddler to launch, before continuing with the next steps!
 
 If still unreachable after relaunch:
 > "Fiddler Everywhere is not reachable. Please verify it is running and try again."
@@ -300,6 +375,7 @@ This opens a Chrome window for authentication. Tell the user:
 > "A login window has been opened. Please complete sign-in, then let me know when done."
 
 When done - retry Step 4a.
+
 ---
 
 ## Step 5 — Probe the server
@@ -455,18 +531,5 @@ Authorization = "ApiKey KEY"
 
 ### Git safety
 
-**`AGENT=copilot-cli`, `codex`, `claude-desktop`:** `CONFIG_FILE` lives outside any repository, so `.gitignore` does not apply. Inform the user:
+**All agents** use global config files outside any repository. Inform the user:
 > "Your Fiddler API key is stored in `CONFIG_FILE`. Keep this file private."
-
-**`AGENT=claude-code`, `vscode`, `cursor`:** `CONFIG_FILE` is inside the project directory.
-Check whether `.gitignore` already includes it. If not, append the entry:
-
-```bash
-echo "$CONFIG_FILE" >> .gitignore
-```
-
-If the project uses a shared `.vscode/` folder that is already committed (common in team
-repos), still add `.vscode/mcp.json` to the root `.gitignore` — not to `.vscode/.gitignore`.
-
-Inform the user:
-> "The config file has been added to `.gitignore`. Do not commit it — it contains your personal Fiddler API key in plaintext."
