@@ -23,7 +23,7 @@ To install a single skill:
 ```bash
 npx skills add telerik/fiddler-agent-tools/fiddler-mcp-setup
 npx skills add telerik/fiddler-agent-tools/fiddler-download-setup
-npx skills add telerik/fiddler-agent-tools/fiddler-feature-verification
+npx skills add telerik/fiddler-agent-tools/fiddler-traffic-debugging
 ```
 
 ### Manual setup
@@ -64,7 +64,7 @@ Skills are instruction files that teach coding agents (GitHub Copilot, Claude Co
 |-------|-------------|
 | [`fiddler-download-setup`](skills/fiddler-download-setup/SKILL.md) | Download, install, and launch Fiddler Everywhere from scratch. |
 | [`fiddler-mcp-setup`](skills/fiddler-mcp-setup/SKILL.md) | Connect your agent to the Fiddler Everywhere MCP server. Use this when Fiddler tools aren't available in your agent session. |
-| [`fiddler-feature-verification`](skills/fiddler-feature-verification/SKILL.md) | Verify that a feature's HTTP calls completed correctly by analyzing captured traffic, grouped by endpoint. |
+| [`fiddler-traffic-debugging`](skills/fiddler-traffic-debugging/SKILL.md) | Verify that a feature's HTTP calls completed correctly by analyzing captured traffic, grouped by endpoint. |
 
 ## Prerequisites
 
