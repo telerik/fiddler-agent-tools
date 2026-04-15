@@ -1,5 +1,5 @@
 ---
-name: fiddler-feature-verification
+name: fiddler-traffic-debugging
 description: >
   Verify that a developer-run feature behaved correctly by analyzing HTTP traffic captured
   by Fiddler Everywhere. Always use this skill when a developer asks whether their feature's
