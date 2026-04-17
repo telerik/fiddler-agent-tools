@@ -17,7 +17,8 @@ Guide the user through downloading, installing, and launching Fiddler Everywhere
 1. This skill is shell-first. Fiddler is not installed yet, so no MCP tools are available.
 2. Resolve the current version from the manifest before constructing any download URL.
    Never hardcode a version number.
-3. On Windows if the opened terminal is not powershell or cmd - wrap and run the scripts with: pwsh -c 'script'.
+3. On Windows - detect opened terminal. Only if it is not powershell - wrap and run the scripts with: powershell.exe -Command 'script'. Use single quotes to wrap the script!
+
 ---
 
 ## Phase 1 — Check if Fiddler is already installed
@@ -244,10 +245,9 @@ Linux:
 ```
 
 Windows:
-**Important** On windows if the current terminal used in bash, tell the user app must be launched manually.
-Ask them to launch it and let them confirm when its launched. After confirmation, go to phase 5.
+**Important** On windows if the current terminal used is bash, use the specific **GitBash** script.
 
-(PowerShell):
+**PowerShell**
 ```powershell
 $candidates = @(
   "$env:LOCALAPPDATA\Programs\Fiddler Everywhere\Fiddler Everywhere.exe",
@@ -261,6 +261,24 @@ if ($fiddlerExe) {
   Start-Sleep 15
 }
 ```
+
+**Git Bash**
+```bash
+FIDDLER_EXE=""
+for dir in "$LOCALAPPDATA/Programs/Fiddler Everywhere" \
+           "/c/Program Files/Fiddler Everywhere" \
+           "/c/Program Files (x86)/Fiddler Everywhere"; do
+  if [ -f "$dir/Fiddler Everywhere.exe" ]; then
+    FIDDLER_EXE="$dir/Fiddler Everywhere.exe"
+    break
+  fi
+done
+if [ -n "$FIDDLER_EXE" ]; then
+  "$FIDDLER_EXE" &
+  sleep 15
+fi
+```
+
 ---
 
 ## Phase 5 — Suggest MCP setup
