@@ -22,7 +22,7 @@ inspection, status, and session APIs.
 - **Shell-first.** MCP is not yet configured, so you cannot use MCP tools.
 - **Sequential execution only.** Follow steps strictly in order — do not run steps or scripts in parallel. Each step may depend on values produced by the previous one.
 - **Execute provided scripts directly** - do not modify or substitute the existing scripts.
-- **On Windows** - if the opened terminal is not powershell or cmd - wrap and run the scripts with: pwsh -c 'script'.
+- **On Windows** - Detect opened terminal. Only if it is not powershell - wrap and run the scripts with: powershell.exe -Command 'script'. Use single quotes to wrap the script!
 - **`curl` only for Steps 3 through 5.** No other raw HTTP requests.
 - **The MCP path is always `/mcp`.** Do not attempt to discover or vary it.
 - **Direct path checks only** when detecting agent directories (e.g. `test -d .vscode`). 
@@ -148,9 +148,9 @@ If **multiple** markers match, do **not** guess. Ask the user:
 
 | Agent | Set `AGENT=` | Set `CONFIG_FILE=` |
 |-------|-------------|-------------------|
-| `vscode` | `vscode` | `~/.config/Code/User/mcp.json` (macOS/Linux) or `%APPDATA%\Code\User\mcp.json` (Windows) |
-| `cursor` | `cursor` | `~/.cursor/mcp.json` (macOS/Linux) or `%APPDATA%\Cursor\User\mcp.json` (Windows) |
-| `claude-code` | `claude-code` | `~/.claude/mcp.json` |
+| `vscode` | `vscode` | `~/Library/Application Support/Code/User/mcp.json` (macOS/Linux) or `%APPDATA%\Code\User\mcp.json` (Windows) |
+| `cursor` | `cursor` | `~/.cursor/mcp.json` |
+| `claude-code` | `claude-code` | `~/.claude.json` |
 | `claude-desktop` | `claude-desktop` | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows) |
 | `copilot-cli` or `copilot-cli-in-path` | `copilot-cli` | `~/.copilot/mcp-config.json` |
 | `codex` or `codex-in-path` | `codex` | `~/.codex/config.toml` |
@@ -242,10 +242,9 @@ Linux:
 ```
 
 Windows:
-**Important** On windows if the current terminal used in bash, tell the user app must be launched manually.
-Ask them to launch it and let them confirm when its launched. After confirmation, go to Step 4.
+**Important** On windows if the current terminal used is bash, use the specific **GitBash** script.
 
-(PowerShell):
+**PowerShell**
 ```powershell
 $candidates = @(
   "$env:LOCALAPPDATA\Programs\Fiddler Everywhere\Fiddler Everywhere.exe",
@@ -258,6 +257,23 @@ if ($fiddlerExe) {
   Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmdLine } | Out-Null
   Start-Sleep 15
 }
+```
+
+**Git Bash**
+```bash
+FIDDLER_EXE=""
+for dir in "$LOCALAPPDATA/Programs/Fiddler Everywhere" \
+           "/c/Program Files/Fiddler Everywhere" \
+           "/c/Program Files (x86)/Fiddler Everywhere"; do
+  if [ -f "$dir/Fiddler Everywhere.exe" ]; then
+    FIDDLER_EXE="$dir/Fiddler Everywhere.exe"
+    break
+  fi
+done
+if [ -n "$FIDDLER_EXE" ]; then
+  "$FIDDLER_EXE" &
+  sleep 15
+fi
 ```
 
 **Important:** Wait 15 seconds for Fiddler to launch, before continuing with the next steps!
