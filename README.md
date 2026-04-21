@@ -13,7 +13,7 @@ Use these skills any time you want your AI coding agent to reason about real net
 The fastest way to install all Fiddler skills is through the `skills` CLI — no manual file placement needed:
 
 ```bash
-npx skills add telerik/fiddler-agent-tools
+npx skills add telerik/fiddler-agent-tools/skills
 ```
 
 This automatically detects your agent and places the skill files in the correct directory.
@@ -21,9 +21,9 @@ This automatically detects your agent and places the skill files in the correct 
 To install a single skill:
 
 ```bash
-npx skills add telerik/fiddler-agent-tools/fiddler-mcp-setup
-npx skills add telerik/fiddler-agent-tools/fiddler-download-setup
-npx skills add telerik/fiddler-agent-tools/fiddler-traffic-debugging
+npx skills add telerik/fiddler-agent-tools --skill fiddler-mcp-setup
+npx skills add telerik/fiddler-agent-tools --skill fiddler-download-setup
+npx skills add telerik/fiddler-agent-tools --skill fiddler-traffic-debugging
 ```
 
 ### Manual setup
