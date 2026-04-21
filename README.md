@@ -21,9 +21,9 @@ This automatically detects your agent and places the skill files in the correct 
 To install a single skill:
 
 ```bash
-npx skills add telerik/fiddler-agent-tools/fiddler-mcp-setup
-npx skills add telerik/fiddler-agent-tools/fiddler-download-setup
-npx skills add telerik/fiddler-agent-tools/fiddler-traffic-debugging
+npx skills add telerik/fiddler-agent-tools --skill fiddler-mcp-setup
+npx skills add telerik/fiddler-agent-tools --skill fiddler-download-setup
+npx skills add telerik/fiddler-agent-tools --skill fiddler-traffic-debugging
 ```
 
 ### Manual setup
