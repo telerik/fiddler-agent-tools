@@ -21,16 +21,28 @@ looks correct, and produce a grouped-by-endpoint summary with likely issues.
 
 1. This skill is MCP-first. Use Fiddler Everywhere MCP tools for traffic analysis whenever they are available in the current session.
 2. Do not use shell tools, `rg`, `grep`, workspace file scans, or exported session dumps to inspect traffic if the Fiddler MCP tools are available.
-3. Use `ApplyFilters` whenever it helps narrow a large or noisy capture to the traffic that matters for the feature verification.
+3. Prefer `CaptureApplication` as a pre-capture step when you know which process to focus on — it scopes the capture at the OS level and keeps the session list clean from the start. Use `ApplyFilters` whenever it helps narrow a large or noisy capture to the traffic that matters for the feature verification.
 4. Keep the analysis practical. The goal is to verify whether the feature appears to work, not to produce an exhaustive packet-level audit.
 5. If the Fiddler MCP tools are not available in the current session, stop and tell the user to run [`fiddler-mcp-setup`](../fiddler-mcp-setup/SKILL.md) first, then retry.
 6. Never manually probe `/mcp` or send raw MCP protocol requests with `curl` when the runtime already exposes Fiddler MCP tools.
 7. Use only tool names that the host advertises in `tools/list`. Never invent or assume tool names beyond the ones available in the session.
+8. All session tools (`GetSessionsCount`, `GetSessions`, `GetSessionDetails`, `ClearSessions`, `ApplyFilters`) require a `sessionsSource` parameter — always pass `LiveTraffic` for captured HTTP/HTTPS traffic or `AgentCalls` for LLM/AI agent API calls. Never omit this parameter.
+
+## Session sources
+
+Fiddler exposes two session sources; always pass the correct one to every session tool:
+
+| `sessionsSource` | When to use |
+|---|---|
+| `LiveTraffic` | Real-time captured HTTP/HTTPS traffic from browsers, terminals, or instrumented processes. Default for feature verification. |
+| `AgentCalls` | LLM/AI agent API calls (e.g. OpenAI, Anthropic, Azure OpenAI). Sessions here also carry `isCached`, the LLM model name, and a preview of the last user prompt. Use when verifying AI agent behavior or investigating LLM call patterns. |
+
+Agent API calls are also HTTP traffic and appear in both sources; `AgentCalls` gives the enriched metadata view.
 
 ## Prerequisites check
 
 1. Verify that Fiddler Everywhere is installed.
-1. Verify that the Fiddler Everywhere MCP tools are available.
+2. Verify that the Fiddler Everywhere MCP tools are available.
 
 ## Useful tools and how to use them
 
@@ -43,6 +55,25 @@ What it helps verify:
 - Whether Fiddler appears to be capturing traffic
 - Whether there are browser or terminal instances attached
 - Whether HTTPS inspection prerequisites look healthy
+
+### `CaptureApplication`
+
+**Use this as the first step whenever you know which process generates the traffic you want to verify.**
+
+This is the most powerful noise-reduction tool available. It scopes the OS-level capture to one or more specific processes, so only their traffic appears in the Live Traffic inspector — eliminating background noise from browsers, IDEs, system services, and other apps running at the same time.
+
+How to use it:
+- Supply the process name or PID inferred from the current IDE or CLI context (e.g. the process running the feature under test).
+- Multiple targets are space-separated; multi-word names must be quoted (e.g. `"Google Chrome"`).
+- The supplied list replaces the current capture filter. When elicitation is supported, Fiddler may offer to merge with the existing filter instead.
+- After calling `CaptureApplication`, clear any stale sessions with `ClearSessions` (passing `sessionsSource: LiveTraffic`) before the user runs the feature, so the resulting capture contains only the relevant run.
+
+When `CaptureApplication` is not appropriate:
+- The process name or PID is unknown and cannot be inferred.
+- The feature spans multiple processes whose names are not determinable.
+- The user explicitly wants to analyze unfiltered traffic.
+
+In those cases, fall back to `ApplyFilters` after `GetSessions`.
 
 ### `GetSessionsCount`
 
@@ -71,7 +102,7 @@ When narrowing the list, prefer clues from the user's request such as:
 
 If the session list is already manageable, narrowing locally in memory is usually enough. If the capture is large or noisy, use `ApplyFilters` to focus Fiddler on the host, endpoint family, method, or failure pattern that matters.
 
-### `GetSessionDetails(id)`
+### `GetSessionDetails`
 
 Use this after `GetSessions` identifies the interesting sessions.
 
@@ -89,6 +120,8 @@ Use the details to inspect:
 - Content length and content type
 - Auth headers, cookies, validation messages, and error payloads
 
+For `AgentCalls` sessions, also inspect the LLM model, `isCached` flag, and the last user prompt preview — these often reveal misconfigured model routing or unexpected cache hits.
+
 Rate limit: avoid firing more than 5 `GetSessionDetails` calls in rapid succession.
 
 ### `ApplyFilters`
@@ -99,39 +132,57 @@ Possible use cases:
 - Show only traffic for one host
 - Show only failing requests
 - Focus the UI on a particular endpoint family
-- Reduce a very large capture to the recent feature run you actually need to inspect
 - Isolate retries, auth failures, or one request method such as `POST`
 
-It is often useful when `GetSessions` returns too much unrelated traffic.
+To reset filters, call `ApplyFilters` with an empty filter collection.
+
+### `ClearSessions`
+
+Use this to remove stale sessions before a focused capture run. Always pass `sessionsSource`. Typically called after `CaptureApplication` and before the user runs the feature, to ensure the resulting inspector contains only the relevant session set.
+
+### `StartCaptureWithBrowser` / `StartCaptureWithTerminal`
+
+Use these when the feature under test needs a fresh, proxy-configured environment:
+- `StartCaptureWithBrowser` — opens a Chrome instance with Fiddler proxy pre-applied.
+- `StartCaptureWithTerminal` — opens a terminal with Fiddler proxy environment variables set.
+
+These are useful when the target process cannot be instrumented via `CaptureApplication`, or when a clean browser session is needed to avoid cached auth state.
 
 ## Suggested workflow
 
 This workflow is intentionally flexible. Adapt it to the feature and the amount of captured traffic.
 
-1. Understand the feature scope.
-   - Extract any useful clue from the user's request: action performed, host, path fragment, method, or expected endpoint.
+1. **Understand the feature scope.**
+   - Extract any useful clue from the user's request: action performed, host, path fragment, method, target process, or expected endpoint.
+   - Determine the appropriate `sessionsSource`: use `LiveTraffic` for standard HTTP features, `AgentCalls` when verifying LLM or AI agent behavior.
    - If the request is vague, analyze the most recent traffic and say that the result is based on the recent capture.
 
-2. Pull the session list with `GetSessions`.
+2. **Scope the capture (strongly preferred).**
+   - If the target process is known or can be inferred from the IDE/CLI context, call `CaptureApplication` with the process name or PID.
+   - Then call `ClearSessions` (with `sessionsSource: LiveTraffic`) to discard prior noise, so the next run produces a clean capture.
+   - Ask the user to run the feature if they haven't yet, or proceed to analysis if they already have.
+
+3. **Pull the session list with `GetSessions`.**
    - Shortlist sessions that match the feature scope.
    - If no clear clue is available, focus on the most recent burst of related sessions rather than the entire capture history.
-   - If the capture is too noisy to reason about comfortably, use `ApplyFilters` to narrow the visible traffic before continuing.
+   - If the capture is still too noisy, use `ApplyFilters` to narrow further.
 
-3. Group traffic by endpoint.
+4. **Group traffic by endpoint.**
    - Group by host + normalized path.
    - Strip query strings for grouping.
-   - Treat numeric IDs and UUID-like segments as path variables when useful, so `/users/123` and `/users/456` are understood as the same endpoint family.
+   - Treat numeric IDs and UUID-like segments as path variables, so `/users/123` and `/users/456` are understood as the same endpoint family.
 
-4. Review the sequence.
+5. **Review the sequence.**
    - Check whether the request flow looks plausible for the feature.
    - Look for expected follow-up calls such as create then fetch, preflight then actual request, upload then status poll, or save then refresh.
    - If a needed follow-up call is absent, call that out as a possible issue rather than a certainty unless the evidence is strong.
 
-5. Inspect representative details.
+6. **Inspect representative details.**
    - Fetch details for failures, slow calls, mixed-status endpoints, and one or two key successful endpoints.
+   - For `AgentCalls`, also check model name, cache hits, and prompt previews.
    - Use response bodies and headers as evidence when explaining whether the feature appears healthy.
 
-6. Decide whether the feature appears to work properly.
+7. **Decide whether the feature appears to work properly.**
    - A healthy feature run usually shows the expected endpoints, mostly successful status codes, reasonable latency, and no repeated failures.
    - If the traffic is incomplete or ambiguous, say so directly.
 
@@ -145,6 +196,8 @@ Feature Verification
 Overall verdict: [Feature appears healthy / Feature appears partially successful / Feature likely failed / Inconclusive]
 
 Traffic window: [what part of the capture you analyzed]
+Sessions source: [LiveTraffic / AgentCalls]
+Capture scope: [CaptureApplication used: <process name/PID> / Unscoped — all traffic analyzed]
 
 Endpoint summary:
 - METHOD HOST /normalized/path
@@ -172,6 +225,7 @@ Conclusion:
 
 1. Group the summary by endpoint, not by raw session ID.
 2. Include status-code distribution and timing for each endpoint group.
-3. If there are no obvious issues, say so explicitly: `No obvious issues detected in the analyzed traffic.`
-4. If there are issues, prefix each issue with `⚠️`, name it clearly, and explain what it appears to be.
-5. If the capture is ambiguous or incomplete, say that the conclusion is tentative.
+3. Always state which `sessionsSource` was used and whether `CaptureApplication` scoped the capture.
+4. If there are no obvious issues, say so explicitly: `No obvious issues detected in the analyzed traffic.`
+5. If there are issues, prefix each issue with `⚠️`, name it clearly, and explain what it appears to be.
+6. If the capture is ambiguous or incomplete, say that the conclusion is tentative.
