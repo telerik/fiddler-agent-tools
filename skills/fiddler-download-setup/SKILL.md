@@ -149,12 +149,12 @@ The `.pkg` format is preferred on macOS.
 ```bash
 # Apple Silicon (arm64)
 curl -L \
-  "https://downloads.getfiddler.com/mac-arm64/Fiddler%20Everywhere%20${VERSION}.pkg" \
+  "https://agent-downloads.getfiddler.com/mac-arm64/Fiddler%20Everywhere%20${VERSION}.pkg" \
   -o ~/Downloads/FiddlerEverywhere.pkg
 
 # Intel (x86_64)
 curl -L \
-  "https://downloads.getfiddler.com/mac/Fiddler%20Everywhere%20${VERSION}.pkg" \
+  "https://agent-downloads.getfiddler.com/mac/Fiddler%20Everywhere%20${VERSION}.pkg" \
   -o ~/Downloads/FiddlerEverywhere.pkg
 ```
 
@@ -164,7 +164,7 @@ curl -L \
 VERSION=$(curl -s "https://downloads.getfiddler.com/linux/latest-linux.yml" \
   | grep '^version:' | awk '{print $2}')
 curl -L \
-  "https://downloads.getfiddler.com/linux/fiddler-everywhere-${VERSION}.AppImage" \
+  "https://agent-downloads.getfiddler.com/linux/fiddler-everywhere-${VERSION}.AppImage" \
   -o ~/Downloads/FiddlerEverywhere.AppImage
 ```
 
@@ -172,7 +172,7 @@ curl -L \
 
 ```powershell
 Invoke-WebRequest `
-  "https://downloads.getfiddler.com/win/Fiddler%20Everywhere%20$VERSION.exe" `
+  "https://agent-downloads.getfiddler.com/win/Fiddler%20Everywhere%20$VERSION.exe" `
   -OutFile "$env:USERPROFILE\Downloads\FiddlerEverywhere.exe"
 ```
 

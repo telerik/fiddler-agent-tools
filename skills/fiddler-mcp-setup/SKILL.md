@@ -6,8 +6,7 @@ description: >
   Fiddler MCP tools are not available, you cannot see Fiddler tools, get an authentication
   error connecting to Fiddler, need to configure Fiddler MCP for the first time, or hear
   "tool not found" errors when trying to use other Fiddler skills. Calls Fiddler's local
-  API endpoint to get or generate the MCP API key automatically, writes the correct
-  config file for the detected agent, gitignores it, and verifies the connection end-to-end.
+  autoconfigure API to detect existing config and write the correct settings automatically.
   The only prerequisite is that Fiddler Everywhere is running.
 ---
 
@@ -15,27 +14,18 @@ description: >
 
 Configure the Fiddler Everywhere MCP server so that agent tools can call Fiddler's traffic
 inspection, status, and session APIs.
+
 ---
 
 ## Operating rules
 
 - **Shell-first.** MCP is not yet configured, so you cannot use MCP tools.
 - **Sequential execution only.** Follow steps strictly in order — do not run steps or scripts in parallel. Each step may depend on values produced by the previous one.
-- **Execute provided scripts directly** - do not modify or substitute the existing scripts.
-- **On Windows** - Detect opened terminal. Only if it is not powershell - wrap and run the scripts with: powershell.exe -Command 'script'. Use single quotes to wrap the script!
-- **`curl` only for Steps 3 through 5.** No other raw HTTP requests.
-- **The MCP path is always `/mcp`.** Do not attempt to discover or vary it.
-- **Direct path checks only** when detecting agent directories (e.g. `test -d .vscode`). 
-Never use recursive globs (`**`) or `rg`/`grep` without a scoped directory argument.
+- **On Windows** — detect opened terminal. Only if it is not PowerShell, wrap scripts with: `powershell.exe -Command 'script'`. Use single quotes to wrap the script.
 
 ---
 
-## Step 1 — Verify Fiddler is installed and running
-
-Before any MCP configuration, confirm Fiddler Everywhere is installed and the MCP
-listener is reachable.
-
-### Check installation
+## Step 1 — Verify Fiddler is installed
 
 **macOS:**
 ```bash
@@ -44,7 +34,7 @@ if [ -d "/Applications/Fiddler Everywhere.app" ]; then echo "INSTALLED"; else ec
 
 **Linux:**
 ```bash
-if command -v fiddler-everywhere &>/dev/null || ls ~/Downloads/FiddlerEverywhere.AppImage &>/dev/null; then echo "INSTALLED"; else echo "NOT_INSTALLED"; fi
+if command -v fiddler-everywhere &>/dev/null; then echo "INSTALLED"; else echo "NOT_INSTALLED"; fi
 ```
 
 **Windows (PowerShell):**
@@ -63,44 +53,13 @@ If `NOT_INSTALLED`: stop and tell the user:
 
 ---
 
-## Step 2 — Detect agent and check for existing configuration
+## Step 2 — Detect the provider
 
-### 2a — Detect the agent
+Identify which agent is being configured and set `PROVIDER`.
 
-Use a three-tier strategy. Stop at the first tier that yields exactly one match.
+### Parent process name
 
-#### Tier 1 — Environment variables (which agent is running this shell right now)
-
-macOS / Linux:
-```bash
-# VS Code / GitHub Copilot
-[ -n "$VSCODE_PID" ] || [ "$TERM_PROGRAM" = "vscode" ] && echo "vscode"
-# Cursor
-[ -n "$CURSOR_TRACE_ID" ] || [ "$TERM_PROGRAM" = "cursor" ] && echo "cursor"
-# Claude Code CLI
-[ -n "$CLAUDE_CODE_ENTRYPOINT" ] && echo "claude-code"
-# GitHub Copilot CLI
-[ -n "$GITHUB_COPILOT_CLI" ] && echo "copilot-cli"
-# OpenAI Codex CLI
-[ -n "$OPENAI_CODEX" ] && echo "codex"
-```
-
-Windows (PowerShell):
-```powershell
-if ($env:VSCODE_PID -or $env:TERM_PROGRAM -eq "vscode") { "vscode" }
-if ($env:CURSOR_TRACE_ID -or $env:TERM_PROGRAM -eq "cursor") { "cursor" }
-if ($env:CLAUDE_CODE_ENTRYPOINT) { "claude-code" }
-if ($env:GITHUB_COPILOT_CLI) { "copilot-cli" }
-if ($env:OPENAI_CODEX) { "codex" }
-```
-
-If exactly one result is printed, set `AGENT` to that value and skip to the mapping table.
-If more than one result is printed, proceed to Tier 2.
-If no results, proceed to Tier 2.
-
-> Claude Desktop does not inject env vars into child shells. If no env var matches, it may still be the active agent — check via Tier 3.
-
-#### Tier 2 — Parent process name (OS-portable, doesn't rely on documented env vars)
+Inspect the parent process:
 
 macOS / Linux:
 ```bash
@@ -114,92 +73,42 @@ Windows (PowerShell):
 
 Match the output against known process names:
 
-| Process name contains | Agent |
-|-----------------------|-------|
+| Process name contains | Provider value |
+|-----------------------|---------------|
 | `code`, `code-helper` | `vscode` |
 | `cursor` | `cursor` |
-| `claude` | `claude-code` |
-| `copilot` | `copilot-cli` |
-| `codex` | `codex` |
+| `claude` | `claude_code` |
+| `copilot` | `copilot_cli` |
+| `codex` | `codex_cli` |
 
-If matched unambiguously, set `AGENT` and skip to the mapping table.
-If still ambiguous or unrecognised, proceed to Tier 3.
 
-#### Tier 3 — Filesystem markers (fallback only)
+If matched unambiguously, set `PROVIDER` to Provider value from the table and proceed to Step 3.
 
-```bash
-test -f ~/.copilot/mcp-config.json && echo "copilot-cli"                                              # GitHub Copilot CLI
-test -d .claude && echo "claude-code"                                                                  # Claude Code CLI
-test -f "$HOME/Library/Application Support/Claude/claude_desktop_config.json" && echo "claude-desktop" # Claude Desktop (macOS)
-test -f "$APPDATA/Claude/claude_desktop_config.json" && echo "claude-desktop"                          # Claude Desktop (Windows)
-test -d .vscode && echo "vscode"                                                                        # VS Code / GitHub Copilot
-test -d .cursor && echo "cursor"                                                                        # Cursor
-test -d ~/.codex && echo "codex"                                                                        # OpenAI Codex CLI
-which copilot 2>/dev/null && echo "copilot-cli-in-path"                                                # Copilot CLI fallback
-which codex  2>/dev/null && echo "codex-in-path"                                                       # Codex CLI fallback
-```
+If still unrecognised, ask the user:
+> "Which agent are you setting Fiddler MCP up for? (VS Code / GitHub Copilot, Cursor, Claude Code CLI, GitHub Copilot CLI, or OpenAI Codex CLI)"
 
-If **multiple** markers match, do **not** guess. Ask the user:
-> "Multiple agent environments were detected on this machine. Which one are you setting Fiddler MCP up for? (Claude Desktop, Claude Code CLI, GitHub Copilot CLI, VS Code / GitHub Copilot, Cursor, or OpenAI Codex CLI)"
+Use the user's answer to set `PROVIDER` from the table above.
 
 ---
 
-#### Agent → config mapping
+## Step 3 — Discover the port
 
-| Agent | Set `AGENT=` | Set `CONFIG_FILE=` |
-|-------|-------------|-------------------|
-| `vscode` | `vscode` | `~/Library/Application Support/Code/User/mcp.json` (macOS/Linux) or `%APPDATA%\Code\User\mcp.json` (Windows) |
-| `cursor` | `cursor` | `~/.cursor/mcp.json` |
-| `claude-code` | `claude-code` | `~/.claude.json` |
-| `claude-desktop` | `claude-desktop` | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows) |
-| `copilot-cli` or `copilot-cli-in-path` | `copilot-cli` | `~/.copilot/mcp-config.json` |
-| `codex` or `codex-in-path` | `codex` | `~/.codex/config.toml` |
-
-If no tier yields a match, ask:
-> "Which agent are you setting this up for? (Claude Desktop, Claude Code CLI, GitHub Copilot CLI, VS Code / GitHub Copilot, Cursor, or OpenAI Codex CLI)"
-
-Use the user's answer to set `AGENT` and `CONFIG_FILE`.
-
-### 2b — Check for existing Fiddler config
-
-With `CONFIG_FILE` now known, check whether a Fiddler entry already exists:
-
-```bash
-grep -l "fiddler" "$CONFIG_FILE" 2>/dev/null
-```
-
-| Result | Action |
-|--------|--------|
-| File matched | A Fiddler config already exists. Read the file and show the user the current `url` and masked key (`xxxxxxxx…`). Ask: **"Fiddler MCP is already configured in `$CONFIG_FILE`. Do you want to re-run setup to refresh the API key, or is something not working?"** Only continue if the user confirms. |
-| No match | No existing config found. Proceed to Step 3. |
-
----
-
-## Step 3 — Discover the MCP port
-
-Fiddler Everywhere listens on port `8868` by default. Before making any calls, confirm
-the correct port is reachable and set `PORT` for all subsequent steps.
+Fiddler Everywhere listens on port `8868` by default. Confirm it is reachable and set `PORT` for all subsequent steps.
 
 macOS / Linux:
 ```bash
-curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:8868/mcp" \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":0,"method":"ping","params":{}}'
+curl -s -o /dev/null -w "%{http_code}" "http://localhost:8868/api/McpManagement/Detect?provider=PROVIDER"
 ```
 
 Windows (PowerShell):
 ```powershell
-curl.exe -s -o NUL -w "%{http_code}" -X POST "http://localhost:8868/mcp" `
-  -H "Content-Type: application/json" `
-  -H "Accept: application/json, text/event-stream" `
-  -d '{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"ping\",\"params\":{}}'
+curl.exe -s -o NUL -w "%{http_code}" "http://localhost:8868/api/McpManagement/Detect?provider=PROVIDER"
 ```
 
 | Result | Action |
 |--------|--------|
-| Any response (even `4xx`) | Port `8868` is reachable. Set `PORT=8868` and proceed to Step 4. |
-| `000` (connection refused) | Port `8868` is not listening. Run the discovery script below. |
+| Any HTTP response code | Port `8868` is reachable. Set `PORT=8868` and proceed to Step 4. |
+| `000` (connection refused) | Port `8868` is not listening. Run the port discovery script below. |
 
 **Port discovery script:**
 
@@ -226,8 +135,19 @@ $ports = Get-ChildItem "$env:USERPROFILE\.fiddler\*\Settings\appsettings.json" -
 Write-Output $(if ($ports) { $ports -join ' ' } else { 'none' })
 ```
 
-Try a `ping` call to each discovered port. Set `PORT` to the first port that responds.
-If no port responds, Fiddler is not running. Launch it using the commands below, wait 15 seconds, then retry discovery from the top of Step 3.
+For each port returned, probe it:
+
+macOS / Linux:
+```bash
+curl -s -o /dev/null -w "%{http_code}" "http://localhost:PORT/api/McpManagement/Detect?provider=PROVIDER"
+```
+
+Windows (PowerShell):
+```powershell
+curl.exe -s -o NUL -w "%{http_code}" "http://localhost:PORT/api/McpManagement/Detect?provider=PROVIDER"
+```
+
+Set `PORT` to the first port that returns any HTTP response. If no port responds, Fiddler is not running — launch it and retry from the top of Step 3.
 
 **Launch Fiddler:**
 
@@ -281,46 +201,40 @@ fi
 If still unreachable after relaunch:
 > "Fiddler Everywhere is not reachable. Please verify it is running and try again."
 
-Once `PORT` is established, use it for all subsequent steps.
-
-> `PORT` is used in all commands from Step 4 onwards.
+> `PORT` is used in all subsequent steps.
 
 ---
 
-## Step 4 — Verify login and get the API key
+## Step 4 — Check for existing configuration
 
-### 4a — Get or generate the API key
+Call the Detect endpoint to see if Fiddler MCP is already configured for this provider:
 
-Once logged in, call the key-management endpoint on `PORT`.
-It returns the existing API key (or generates one automatically if none exists) along with the MCP URL.
-
+macOS / Linux:
 ```bash
-curl -s -X POST "http://localhost:$PORT/api/McpManagement/GetOrGenerateApiKey"
+curl -s "http://localhost:$PORT/api/McpManagement/Detect?provider=PROVIDER"
 ```
 
-Expected success response:
-
-```json
-{
-  "apiKey": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  "port": 8868,
-  "url": "http://localhost:8868/mcp"
-}
+Windows (PowerShell):
+```powershell
+curl.exe -s "http://localhost:$PORT/api/McpManagement/Detect?provider=PROVIDER"
 ```
 
-Extract `apiKey` as **KEY** and `url` as **MCP_URL**.
+Replace `PROVIDER` with the value from Step 2.
 
-| Result | Meaning | Action |
-|--------|---------|--------|
-| JSON with `apiKey` field | Success | Extract `apiKey` as KEY and `url` as MCP_URL. Proceed to Step 5. |
-| `403` / access-denied body | Subscription plan does not include MCP | Stop: "Your Fiddler plan does not include MCP access. Please upgrade your subscription." |
-| User is not logged in | User not logged in yet. | Step 4b - Initiate Login |
-| Any other failure | Unexpected failure | Note the response and ask the user to check Fiddler is running correctly. |
+| Response | Action |
+|----------|--------|
+| Indicates config exists / already configured | Inform the user: "Fiddler MCP is already configured for `PROVIDER`." Ask if they want to re-run setup to refresh the configuration. Only continue if confirmed. |
+| Indicates not configured | Proceed to Step 5. |
+| `403` | Stop: "Your Fiddler plan does not include MCP access. Please upgrade your subscription." |
+| User not logged in | Follow the **Login** procedure below, then retry Step 4. |
 
-### 4b - Initiate Login (if user is not logged in):
+---
 
-The steps are: `initialize` -> `list_tools` -> `initiate_login`
-Send an MCP `initialize` request and get the returned session id.
+### Login (if Fiddler reports the user is not logged in)
+
+Use the MCP protocol to trigger the login flow. Follow these sub-steps in order.
+
+**1. Open an MCP session and get the session ID:**
 
 macOS / Linux:
 ```bash
@@ -342,10 +256,9 @@ $SESSION_ID = ($initResp | Select-String "(?i)mcp-session-id:\s*(\S+)").Matches.
 Write-Host "Session ID: $SESSION_ID"
 ```
 
-If `$SESSION_ID` is empty, the server did not return a session ID — Fiddler may not be
-fully started. Wait a few seconds and retry.
+If `SESSION_ID` is empty, Fiddler may not be fully started — wait a few seconds and retry.
 
-Then fetch the tools list using the same session.
+**2. Fetch the tools list to confirm `initiate_login` is available:**
 
 macOS / Linux:
 ```bash
@@ -365,9 +278,9 @@ curl.exe -s -X POST "http://localhost:$PORT/mcp" `
   -d '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}'
 ```
 
-Confirm `initiate_login` appears in the response before proceeding.
+Confirm `initiate_login` appears in the response before continuing.
 
-Now call `initiate_login` using the same session.
+**3. Call `initiate_login`:**
 
 macOS / Linux:
 ```bash
@@ -375,7 +288,7 @@ curl -s -X POST "http://localhost:$PORT/mcp" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "Mcp-Session-Id: $SESSION_ID" \
-  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"initiate_login","arguments":{}}}'
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"initiate_login","arguments":{}}}'
 ```
 
 Windows (PowerShell):
@@ -384,168 +297,46 @@ curl.exe -s -X POST "http://localhost:$PORT/mcp" `
   -H "Content-Type: application/json" `
   -H "Accept: application/json, text/event-stream" `
   -H "Mcp-Session-Id: $SESSION_ID" `
-  -d '{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"initiate_login\",\"arguments\":{}}}'
+  -d '{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"initiate_login\",\"arguments\":{}}}'
 ```
 
-This opens a Chrome window for authentication. Tell the user:
-> "A login window has been opened. Please complete sign-in, then let me know when done."
+Tell the user:
+> "A login window has been opened in your browser. Please complete sign-in, then let me know when done."
 
-When done - retry Step 4a.
+Wait for the user to confirm sign-in is complete, then retry the step that triggered this login flow.
 
 ---
 
-## Step 5 — Probe the server
+## Step 5 — Autoconfigure
 
-Verify the key is valid using the MCP_URL from Step 3.
+Call the Configure endpoint. Fiddler will automatically generate or reuse the API key and write the correct config file for the provider:
 
 macOS / Linux:
 ```bash
-curl -s -o /dev/null -w "%{http_code}" -X POST "MCP_URL" \
-  -H "Authorization: ApiKey KEY" \
+curl -s -X POST "http://localhost:$PORT/api/McpManagement/Configure" \
   -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"mcp-setup","version":"1.0"}}}'
+  -d '{"provider":"PROVIDER"}'
 ```
 
 Windows (PowerShell):
 ```powershell
-curl.exe -s -o NUL -w "%{http_code}" -X POST "MCP_URL" `
-  -H "Authorization: ApiKey KEY" `
+curl.exe -s -X POST "http://localhost:$PORT/api/McpManagement/Configure" `
   -H "Content-Type: application/json" `
-  -H "Accept: application/json, text/event-stream" `
-  -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"mcp-setup\",\"version\":\"1.0\"}}}'
+  -d '{\"provider\":\"PROVIDER\"}'
 ```
 
-| Code | Meaning | Action |
-|------|---------|--------|
-| `200` or any 2xx | Key valid (response may be an SSE stream — that is normal) | Proceed to Step 6. |
-| `000` | Fiddler stopped between Step 4 and now | Re-run from Step 3. |
-| `401` | Key rejected | Re-run Step 4 to regenerate the key, then retry. |
-| `403` | Subscription plan does not include MCP | Stop: "Your Fiddler plan does not include MCP access." |
-| Anything else | Unexpected — note the code | Proceed to Step 6 anyway. |
+Replace `PROVIDER` with the value from Step 2.
 
-**Do not** retry with any path other than `/mcp`. The Fiddler MCP path is always `/mcp`.
+| Response | Action |
+|----------|--------|
+| Success / 2xx | Configuration written. Proceed to Step 6. |
+| `403` | Stop: "Your Fiddler plan does not include MCP access. Please upgrade your subscription." |
+| User not logged in | Follow the **Login** procedure in Step 4, then retry Step 5. |
+| Any other failure | Note the response and ask the user to check Fiddler is running correctly. |
 
 ---
 
-## Step 6 — Write the config file
+## Step 6 — Confirm success
 
-Use `CONFIG_FILE` set in Step 2. 
-Use the exact KEY and MCP_URL values from Step 4.
-
-**If `CONFIG_FILE` already exists:** read it first, then add only the `fiddler`
-server block. Do **not** remove or overwrite other existing server entries.
-
-**If it does not exist:** create it using the template for `AGENT` below.
-
-### `AGENT=copilot-cli`
-
-```json
-{
-  "mcpServers": {
-    "fiddler": {
-      "type": "http",
-      "url": "MCP_URL",
-      "headers": {
-        "Authorization": "ApiKey KEY"
-      },
-      "tools": ["*"]
-    }
-  }
-}
-```
-
-> Note: `"tools": ["*"]` is required by Copilot CLI — omitting it disables all tools.
-
----
-
-### `AGENT=claude-desktop`
-
-Claude Desktop does not support the `http` MCP transport directly. Use `npx mcp-remote` as a bridge.
-
-```json
-{
-  "mcpServers": {
-    "fiddler": {
-      "command": "npx",
-      "args": [
-        "mcp-remote",
-        "MCP_URL",
-        "--header",
-        "Authorization:ApiKey KEY"
-      ]
-    }
-  }
-}
-```
-
-> Note: `npx` must be available on the system PATH. If Node.js is not installed, direct the user to https://nodejs.org.
-
----
-
-### `AGENT=claude-code`
-
-```json
-{
-  "mcpServers": {
-    "fiddler": {
-      "type": "http",
-      "url": "MCP_URL",
-      "headers": {
-        "Authorization": "ApiKey KEY"
-      }
-    }
-  }
-}
-```
-
-### `AGENT=vscode`
-
-```json
-{
-  "servers": {
-    "fiddler": {
-      "type": "http",
-      "url": "MCP_URL",
-      "headers": {
-        "Authorization": "ApiKey KEY"
-      }
-    }
-  }
-}
-```
-
-### `AGENT=cursor`
-
-```json
-{
-  "mcpServers": {
-    "fiddler": {
-      "url": "MCP_URL",
-      "headers": {
-        "Authorization": "ApiKey KEY"
-      }
-    }
-  }
-}
-```
-
-### `AGENT=codex`
-
-Codex CLI uses TOML.
-
-```toml
-[mcp_servers.fiddler]
-enabled = true
-url = "MCP_URL"
-
-[mcp_servers.fiddler.http_headers]
-Authorization = "ApiKey KEY"
-```
-
----
-
-### Git safety
-
-**All agents** use global config files outside any repository. Inform the user:
-> "Your Fiddler API key is stored in `CONFIG_FILE`. Keep this file private."
+Tell the user:
+> "Fiddler MCP has been configured for `PROVIDER`. Restart your agent (reload the VS Code window, restart Cursor, etc.) to pick up the new configuration, then try using a Fiddler tool."
