@@ -18,6 +18,8 @@ Guide the user through downloading, installing, and launching Fiddler Everywhere
 2. Resolve the current version from the manifest before constructing any download URL.
    Never hardcode a version number.
 3. On Windows - detect opened terminal. Only if it is not powershell - wrap and run the scripts with: powershell.exe -Command 'script'. Use single quotes to wrap the script!
+4. Treat downloaded installers as untrusted until they pass the platform verification steps below.
+5. Use HTTPS only and download through the `agent-downloads.getfiddler.com` tracking endpoint. Follow at most one HTTPS redirect, then rely on the platform checksum or signature verification to reject unexpected content.
 
 ---
 
@@ -47,7 +49,7 @@ if [ "$ARCH" = "arm64" ]; then
 else
   MANIFEST_URL="https://downloads.getfiddler.com/mac/latest-mac.yml"
 fi
-LATEST_VERSION=$(curl -s "$MANIFEST_URL" | grep '^version:' | awk '{print $2}')
+LATEST_VERSION=$(curl --fail --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 "$MANIFEST_URL" | grep '^version:' | awk '{print $2}')
 echo "Installed: $INSTALLED_VERSION  |  Latest: $LATEST_VERSION"
 if [ "$INSTALLED_VERSION" = "$LATEST_VERSION" ]; then
   echo "UP_TO_DATE"
@@ -63,7 +65,7 @@ if command -v fiddler-everywhere &>/dev/null || [ -n "$APPIMAGE" ]; then
   # Extract version from AppImage filename as the most reliable source
   INSTALLED_VERSION=$(echo "$APPIMAGE" | grep -oP '[\d]+\.[\d]+\.[\d]+')
   echo "INSTALLED: $INSTALLED_VERSION"
-  LATEST_VERSION=$(curl -s "https://downloads.getfiddler.com/linux/latest-linux.yml" \
+  LATEST_VERSION=$(curl --fail --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 "https://downloads.getfiddler.com/linux/latest-linux.yml" \
     | grep '^version:' | awk '{print $2}')
   echo "Installed: $INSTALLED_VERSION  |  Latest: $LATEST_VERSION"
   if [ "$INSTALLED_VERSION" = "$LATEST_VERSION" ]; then
@@ -90,8 +92,10 @@ if ($installed) {
   Write-Host "INSTALLED: $installedVersion"
 
   $manifest = Invoke-WebRequest "https://downloads.getfiddler.com/win/latest.yml" -UseBasicParsing
-  $text = [System.Text.Encoding]::UTF8.GetString($manifest.RawContentStream.ToArray())
-  $latestVersion = ($text | Select-String '(?m)^version:\s*(.+)').Matches.Groups[1].Value.Trim()
+  $text = [string]$manifest.Content
+  $match = [regex]::Match($text, 'version\s*:\s*([0-9]+(?:\.[0-9]+)+)')
+  if (-not $match.Success) { throw "Manifest version not found" }
+  $latestVersion = $match.Groups[1].Value
   Write-Host "Installed: $installedVersion  |  Latest: $latestVersion"
 
   if ($installedVersion -eq $latestVersion) { "UP_TO_DATE" } else { "UPDATE_AVAILABLE" }
@@ -116,8 +120,15 @@ Run both commands together. The manifest probe also confirms network access.
 
 ```bash
 uname -s && uname -m
-VERSION=$(curl -s "https://downloads.getfiddler.com/mac-arm64/latest-mac.yml" \
+ARCH=$(uname -m)
+if [ "$ARCH" = "arm64" ]; then
+  MANIFEST_URL="https://downloads.getfiddler.com/mac-arm64/latest-mac.yml"
+else
+  MANIFEST_URL="https://downloads.getfiddler.com/mac/latest-mac.yml"
+fi
+VERSION=$(curl --fail --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 "$MANIFEST_URL" \
   | grep '^version:' | awk '{print $2}')
+[ -n "$VERSION" ] || { echo "Could not resolve the latest version" >&2; exit 1; }
 echo "Latest Fiddler Everywhere: $VERSION"
 ```
 
@@ -125,8 +136,10 @@ On Windows (PowerShell):
 ```powershell
 $env:PROCESSOR_ARCHITECTURE   # AMD64 or ARM64
 $manifest = Invoke-WebRequest "https://downloads.getfiddler.com/win/latest.yml" -UseBasicParsing
-$text = [System.Text.Encoding]::UTF8.GetString($manifest.RawContentStream.ToArray())
-$VERSION = ($text | Select-String '(?m)^version:\s*(.+)').Matches.Groups[1].Value.Trim()
+$text = [string]$manifest.Content
+$match = [regex]::Match($text, 'version\s*:\s*([0-9]+(?:\.[0-9]+)+)')
+if (-not $match.Success) { throw "Manifest version not found" }
+$VERSION = $match.Groups[1].Value
 Write-Host "Latest Fiddler Everywhere: $VERSION"
 ```
 
@@ -142,38 +155,117 @@ Write-Host "Latest Fiddler Everywhere: $VERSION"
 ## Phase 3 — Download
 
 Use `$VERSION` resolved in Phase 2 to construct a direct, versioned URL.
-The `.pkg` format is preferred on macOS.
+The `.pkg` format is used on macOS because it supports a headless installation flow.
 
 ### macOS
 
 ```bash
-# Apple Silicon (arm64)
-curl -L \
-  "https://agent-downloads.getfiddler.com/mac-arm64/Fiddler%20Everywhere%20${VERSION}.pkg" \
-  -o ~/Downloads/FiddlerEverywhere.pkg
+# Resolve the architecture-specific manifest and artifact URL.
+ARCH=$(uname -m)
+if [ "$ARCH" = "arm64" ]; then
+  BASE_URL="https://agent-downloads.getfiddler.com/mac-arm64"
+else
+  BASE_URL="https://agent-downloads.getfiddler.com/mac"
+fi
+if [ "$ARCH" = "arm64" ]; then
+  MANIFEST_URL="https://downloads.getfiddler.com/mac-arm64/latest-mac.yml"
+else
+  MANIFEST_URL="https://downloads.getfiddler.com/mac/latest-mac.yml"
+fi
+VERSION=$(curl --fail --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 "$MANIFEST_URL" \
+  | grep '^version:' | awk '{print $2}')
+[ -n "$VERSION" ] || { echo "Could not resolve the latest version" >&2; exit 1; }
 
-# Intel (x86_64)
-curl -L \
-  "https://agent-downloads.getfiddler.com/mac/Fiddler%20Everywhere%20${VERSION}.pkg" \
-  -o ~/Downloads/FiddlerEverywhere.pkg
+# Download through the tracking endpoint and follow its single expected redirect.
+curl --fail --silent --show-error --proto '=https' --proto-redir '=https' \
+  --location --max-redirs 1 \
+  "$BASE_URL/Fiddler%20Everywhere%20${VERSION}.pkg" -o ~/Downloads/FiddlerEverywhere.pkg
 ```
 
 ### Linux
 
 ```bash
-VERSION=$(curl -s "https://downloads.getfiddler.com/linux/latest-linux.yml" \
-  | grep '^version:' | awk '{print $2}')
-curl -L \
-  "https://agent-downloads.getfiddler.com/linux/fiddler-everywhere-${VERSION}.AppImage" \
+MANIFEST=$(mktemp "${TMPDIR:-/tmp}/fiddler-manifest.XXXXXX") || exit 1
+curl --fail --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 \
+  "https://downloads.getfiddler.com/linux/latest-linux.yml" -o "$MANIFEST" || {
+  rm -f "$MANIFEST"
+  exit 1
+}
+VERSION=$(awk -F': ' '$1 == "version" {print $2; exit}' "$MANIFEST")
+[ -n "$VERSION" ] || { rm -f "$MANIFEST"; exit 1; }
+EXPECTED_SHA512=$(awk -v artifact="fiddler-everywhere-${VERSION}.AppImage" '
+  $0 ~ "url: " artifact "$" { found=1; next }
+  found && $0 ~ /^[[:space:]]+sha512:/ {
+    sub(/^[^:]*:[[:space:]]*/, "")
+    print
+    exit
+  }
+  found && $0 ~ /^[[:space:]]*-[[:space:]]+url:/ { exit }
+' "$MANIFEST")
+rm -f "$MANIFEST"
+curl --fail --silent --show-error --proto '=https' --proto-redir '=https' \
+  --location --max-redirs 1 "https://agent-downloads.getfiddler.com/linux/fiddler-everywhere-${VERSION}.AppImage" \
   -o ~/Downloads/FiddlerEverywhere.AppImage
+ACTUAL_SHA512=$(openssl dgst -sha512 -binary ~/Downloads/FiddlerEverywhere.AppImage | openssl base64 -A)
+if [ -z "$EXPECTED_SHA512" ] || [ "$ACTUAL_SHA512" != "$EXPECTED_SHA512" ]; then
+  echo "AppImage integrity verification failed" >&2
+  exit 1
+fi
 ```
 
 ### Windows (PowerShell)
 
+The tracking endpoint rejects requests without a `User-Agent`. Apply the header to every
+download client, including one named `$http` in a generated one-line script:
+
 ```powershell
-Invoke-WebRequest `
-  "https://agent-downloads.getfiddler.com/win/Fiddler%20Everywhere%20$VERSION.exe" `
-  -OutFile "$env:USERPROFILE\Downloads\FiddlerEverywhere.exe"
+$http.DefaultRequestHeaders.UserAgent.ParseAdd("PowerShell/$($PSVersionTable.PSVersion)")
+```
+
+```powershell
+$downloadPath = "$env:USERPROFILE\Downloads\FiddlerEverywhere.exe"
+$downloadUri = [Uri]"https://agent-downloads.getfiddler.com/win/Fiddler%20Everywhere%20$VERSION.exe"
+$handler = [System.Net.Http.HttpClientHandler]::new()
+$handler.AllowAutoRedirect = $false
+$client = [System.Net.Http.HttpClient]::new($handler)
+$client.DefaultRequestHeaders.UserAgent.ParseAdd("PowerShell/$($PSVersionTable.PSVersion)")
+try {
+  $response = $client.GetAsync($downloadUri).GetAwaiter().GetResult()
+  if ($response.StatusCode -ge 300 -and $response.StatusCode -lt 400) {
+    $redirectUri = $response.Headers.Location
+    if ($null -eq $redirectUri) {
+      throw "Installer redirect did not include a Location header"
+    }
+    if (-not $redirectUri.IsAbsoluteUri) {
+      $redirectUri = [Uri]::new($downloadUri, $redirectUri.OriginalString)
+    }
+    if ($redirectUri.Scheme -ne "https") {
+      throw "Installer redirect was not HTTPS"
+    }
+    $response = $client.GetAsync($redirectUri).GetAwaiter().GetResult()
+  }
+  if (-not $response.IsSuccessStatusCode) {
+    throw "Installer download failed: $($response.StatusCode)"
+  }
+  [System.IO.File]::WriteAllBytes($downloadPath, $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult())
+} finally {
+  $client.Dispose()
+  $handler.Dispose()
+}
+
+$manifest = Invoke-WebRequest "https://downloads.getfiddler.com/win/latest.yml" `
+  -MaximumRedirection 0 -UseBasicParsing
+$text = $manifest.Content
+$expectedSha512 = ($text | Select-String '(?m)^sha512:\s*(.+)').Matches.Groups[1].Value.Trim()
+$bytes = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Downloads\FiddlerEverywhere.exe")
+$actualSha512 = [Convert]::ToBase64String(([Security.Cryptography.SHA512]::Create().ComputeHash($bytes)))
+if ([string]::IsNullOrWhiteSpace($expectedSha512) -or $actualSha512 -ne $expectedSha512) {
+  throw "Installer integrity verification failed"
+}
+$signature = Get-AuthenticodeSignature "$env:USERPROFILE\Downloads\FiddlerEverywhere.exe"
+if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "Progress Software Corporation") {
+  throw "Installer Authenticode signature verification failed: $($signature.Status)"
+}
 ```
 
 ---
@@ -187,37 +279,43 @@ the agent's hidden shell where the user cannot type. Use `osascript` instead, wh
 raises the native macOS authentication dialog that the user can see on screen.
 
 `do shell script with administrator privileges` runs as root and cannot access
-`~/Downloads` due to macOS sandbox restrictions. Copy the package to `/tmp` first
-(world-readable), then install from there.
+`~/Downloads` reliably. Copy the verified package to a private temporary directory
+first, then install from there.
 
-Run both commands via bash tool calls:
+Before running the following command, tell the user:
 
-```bash
-cp ~/Downloads/FiddlerEverywhere.pkg /tmp/FiddlerEverywhere.pkg
-```
+> A macOS password dialog may appear on your screen. Enter your login password there
+> to authorize the installation, then I'll continue automatically.
 
-Then announce before the next command:
-> "A macOS password dialog will appear on your screen. Enter your login password there
-> to authorize the installation, then I'll continue automatically."
+Then run the following as one shell command.
 
 ```bash
-osascript -e 'do shell script "installer -pkg /tmp/FiddlerEverywhere.pkg -target /" with administrator privileges'
+STAGING_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fiddler-install.XXXXXX") || exit 1
+chmod 700 "$STAGING_DIR"
+trap 'rm -rf "$STAGING_DIR"' EXIT
+cp ~/Downloads/FiddlerEverywhere.pkg "$STAGING_DIR/FiddlerEverywhere.pkg" || exit 1
+PKG="$STAGING_DIR/FiddlerEverywhere.pkg"
+SIGNATURE=$(pkgutil --check-signature "$PKG") || {
+  echo "Package signature inspection failed" >&2
+  exit 1
+}
+printf '%s\n' "$SIGNATURE" | grep -q "Developer ID Installer: Telerik A D" || {
+  echo "Unexpected package signer" >&2
+  exit 1
+}
+spctl --assess --type install --verbose=2 "$PKG" || {
+  echo "Package notarization assessment failed" >&2
+  exit 1
+}
+
+PKG_PATH="$PKG" osascript <<'APPLESCRIPT'
+set pkgPath to system attribute "PKG_PATH"
+do shell script "installer -pkg " & quoted form of pkgPath & " -target /" with administrator privileges
+APPLESCRIPT
 ```
 
-`osascript` blocks until the user approves the dialog and the install completes. Once it
-exits with code 0, clean up.
-
-```bash
-rm /tmp/FiddlerEverywhere.pkg
-```
-
-### macOS — DMG (if user prefers drag-and-drop)
-
-```bash
-hdiutil attach ~/Downloads/FiddlerEverywhere.dmg -nobrowse
-cp -R "/Volumes/Fiddler Everywhere/Fiddler Everywhere.app" /Applications/
-hdiutil detach "/Volumes/Fiddler Everywhere"
-```
+`osascript` blocks until the user approves the dialog and the install completes. The
+temporary staging directory is removed automatically when the command exits.
 
 ### Linux
 
@@ -317,7 +415,5 @@ Acknowledge and let them know they can download the MCP setup skill later at any
 
 | Issue | Solution |
 |-------|----------|
-| macOS password dialog canceled / install aborted | Rerun the `osascript` command — the pkg in `/tmp` is still there |
-| `hdiutil: attach failed` | File may not be fully downloaded — rerun the `curl` command |
+| macOS password dialog canceled / install aborted | Rerun the complete macOS installation block — the verified pkg remains in `~/Downloads` |
 | Windows EXE blocked by SmartScreen | Right-click → Run as Administrator |
-| App won't open on macOS | Run `xattr -cr "/Applications/Fiddler Everywhere.app"` to clear quarantine |
