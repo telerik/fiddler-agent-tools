@@ -92,8 +92,10 @@ if ($installed) {
   Write-Host "INSTALLED: $installedVersion"
 
   $manifest = Invoke-WebRequest "https://downloads.getfiddler.com/win/latest.yml" -UseBasicParsing
-  $text = [System.Text.Encoding]::UTF8.GetString($manifest.RawContentStream.ToArray())
-  $latestVersion = ($text | Select-String '(?m)^version:\s*(.+)').Matches.Groups[1].Value.Trim()
+  $text = [string]$manifest.Content
+  $match = [regex]::Match($text, 'version\s*:\s*([0-9]+(?:\.[0-9]+)+)')
+  if (-not $match.Success) { throw "Manifest version not found" }
+  $latestVersion = $match.Groups[1].Value
   Write-Host "Installed: $installedVersion  |  Latest: $latestVersion"
 
   if ($installedVersion -eq $latestVersion) { "UP_TO_DATE" } else { "UPDATE_AVAILABLE" }
@@ -134,8 +136,10 @@ On Windows (PowerShell):
 ```powershell
 $env:PROCESSOR_ARCHITECTURE   # AMD64 or ARM64
 $manifest = Invoke-WebRequest "https://downloads.getfiddler.com/win/latest.yml" -UseBasicParsing
-$text = [System.Text.Encoding]::UTF8.GetString($manifest.RawContentStream.ToArray())
-$VERSION = ($text | Select-String '(?m)^version:\s*(.+)').Matches.Groups[1].Value.Trim()
+$text = [string]$manifest.Content
+$match = [regex]::Match($text, 'version\s*:\s*([0-9]+(?:\.[0-9]+)+)')
+if (-not $match.Success) { throw "Manifest version not found" }
+$VERSION = $match.Groups[1].Value
 Write-Host "Latest Fiddler Everywhere: $VERSION"
 ```
 
@@ -211,16 +215,30 @@ fi
 
 ### Windows (PowerShell)
 
+The tracking endpoint rejects requests without a `User-Agent`. Apply the header to every
+download client, including one named `$http` in a generated one-line script:
+
+```powershell
+$http.DefaultRequestHeaders.UserAgent.ParseAdd("PowerShell/$($PSVersionTable.PSVersion)")
+```
+
 ```powershell
 $downloadPath = "$env:USERPROFILE\Downloads\FiddlerEverywhere.exe"
 $downloadUri = [Uri]"https://agent-downloads.getfiddler.com/win/Fiddler%20Everywhere%20$VERSION.exe"
 $handler = [System.Net.Http.HttpClientHandler]::new()
 $handler.AllowAutoRedirect = $false
 $client = [System.Net.Http.HttpClient]::new($handler)
+$client.DefaultRequestHeaders.UserAgent.ParseAdd("PowerShell/$($PSVersionTable.PSVersion)")
 try {
   $response = $client.GetAsync($downloadUri).GetAwaiter().GetResult()
   if ($response.StatusCode -ge 300 -and $response.StatusCode -lt 400) {
-    $redirectUri = [Uri]::new($downloadUri, $response.Headers.Location)
+    $redirectUri = $response.Headers.Location
+    if ($null -eq $redirectUri) {
+      throw "Installer redirect did not include a Location header"
+    }
+    if (-not $redirectUri.IsAbsoluteUri) {
+      $redirectUri = [Uri]::new($downloadUri, $redirectUri.OriginalString)
+    }
     if ($redirectUri.Scheme -ne "https") {
       throw "Installer redirect was not HTTPS"
     }
@@ -237,7 +255,7 @@ try {
 
 $manifest = Invoke-WebRequest "https://downloads.getfiddler.com/win/latest.yml" `
   -MaximumRedirection 0 -UseBasicParsing
-$text = [System.Text.Encoding]::UTF8.GetString($manifest.RawContentStream.ToArray())
+$text = $manifest.Content
 $expectedSha512 = ($text | Select-String '(?m)^sha512:\s*(.+)').Matches.Groups[1].Value.Trim()
 $bytes = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Downloads\FiddlerEverywhere.exe")
 $actualSha512 = [Convert]::ToBase64String(([Security.Cryptography.SHA512]::Create().ComputeHash($bytes)))
