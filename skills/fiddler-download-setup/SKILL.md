@@ -17,7 +17,7 @@ Guide the user through downloading, installing, and launching Fiddler Everywhere
 1. This skill is shell-first. Fiddler is not installed yet, so no MCP tools are available.
 2. Resolve the current version from the manifest before constructing any download URL.
    Never hardcode a version number.
-3. On Windows - detect opened terminal. Only if it is not powershell - wrap and run the scripts with: powershell.exe -Command 'script'. Use single quotes to wrap the script!
+3. On Windows, detect the current terminal. Run PowerShell blocks directly in a PowerShell terminal. Otherwise, save each block to a temporary `.ps1` file and run `powershell.exe -NoProfile -NonInteractive -File "<absolute Windows path to script.ps1>"`. Use a Windows-format path even from Git Bash, and remove the temporary script after execution. Do not wrap multiline scripts in shell quotes; embedded quotes are interpreted differently by each shell.
 4. Treat downloaded installers as untrusted until they pass the platform verification steps below.
 5. Use HTTPS only and download through the `agent-downloads.getfiddler.com` tracking endpoint. Follow at most one HTTPS redirect, then rely on the platform checksum or signature verification to reject unexpected content.
 6. Diagnose failures from actual output. If output is truncated, inspect its saved file and use exact paths printed by the script; do not recursively search temporary directories. Do not add `sudo`, change mountpoints, re-download, use verbose mode, or kill processes without evidence.
@@ -31,8 +31,8 @@ If it is installed, also read the installed version and compare it against the l
 available release. Only proceed to Phase 2 if the app is not installed or an update
 is available and the user wants to upgrade.
 
-```bash
 ### macOS — detect and version-check
+```bash
 APP_PATH="$HOME/Applications/Fiddler Everywhere.app"
 if [ ! -d "$APP_PATH" ]; then
   APP_PATH="/Applications/Fiddler Everywhere.app"
@@ -455,7 +455,9 @@ if [ "$ACTUAL_SHA512" != "$EXPECTED_SHA512" ]; then
 fi
 chmod +x "$STAGED_APPIMAGE"
 mv -f "$STAGED_APPIMAGE" "$APPIMAGE"
-"$APPIMAGE" &
+LAUNCH_LOG="$HOME/Downloads/fiddler-everywhere-launch.log"
+nohup "$APPIMAGE" >"$LAUNCH_LOG" 2>&1 </dev/null &
+echo "Fiddler Everywhere launch log: $LAUNCH_LOG"
 ```
 
 ### Windows (PowerShell)
@@ -597,7 +599,11 @@ installation, and cleanup in one PowerShell command:
       throw "Fiddler Everywhere $VERSION was not found in the installed application registry after installation"
     }
   } finally {
-    Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction Stop
+    try {
+      Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction Stop
+    } catch {
+      Write-Warning "Could not remove installer staging folder ${stagingDir}: $($_.Exception.Message)" -WarningAction Continue
+    }
   }
 ```
 ## Phase 4 — Launch Fiddler
@@ -617,6 +623,8 @@ fi
 
 Linux:
 The verified AppImage was started after its checksum passed in Phase 3.
+The launch uses `nohup` with redirected streams to survive shell hangups; inspect
+`~/Downloads/fiddler-everywhere-launch.log` if startup fails.
 
 Windows:
 **Important** On windows if the current terminal used is bash, use the specific **GitBash** script.
