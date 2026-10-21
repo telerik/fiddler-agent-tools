@@ -29,12 +29,22 @@ inspection, status, and session APIs.
 
 **macOS:**
 ```bash
-if [ -d "/Applications/Fiddler Everywhere.app" ]; then echo "INSTALLED"; else echo "NOT_INSTALLED"; fi
+if [ -d "$HOME/Applications/Fiddler Everywhere.app" ] || \
+   [ -d "/Applications/Fiddler Everywhere.app" ]; then
+  echo "INSTALLED"
+else
+  echo "NOT_INSTALLED"
+fi
 ```
 
 **Linux:**
 ```bash
-if command -v fiddler-everywhere &>/dev/null; then echo "INSTALLED"; else echo "NOT_INSTALLED"; fi
+APPIMAGE=$(ls ~/Downloads/fiddler-everywhere-*.AppImage 2>/dev/null | sort -V | tail -1)
+if command -v fiddler-everywhere &>/dev/null || [ -n "$APPIMAGE" ]; then
+  echo "INSTALLED"
+else
+  echo "NOT_INSTALLED"
+fi
 ```
 
 **Windows (PowerShell):**
