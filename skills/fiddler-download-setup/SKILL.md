@@ -396,10 +396,12 @@ INSTALL_DIR=""
 ```bash
 set -e
 
-MANIFEST=$(mktemp "${TMPDIR:-/tmp}/fiddler-manifest.XXXXXX") || exit 1
-ACTUAL_DIGEST="$MANIFEST.digest"
-EXPECTED_DIGEST="$MANIFEST.expected-digest"
-trap 'rm -f "$MANIFEST" "$ACTUAL_DIGEST" "$EXPECTED_DIGEST"' EXIT
+mkdir -p "$HOME/Downloads"
+STAGING_DIR=$(mktemp -d "$HOME/Downloads/.fiddler-setup.XXXXXX") || exit 1
+MANIFEST="$STAGING_DIR/manifest"
+ACTUAL_DIGEST="$STAGING_DIR/actual-digest"
+EXPECTED_DIGEST="$STAGING_DIR/expected-digest"
+trap 'rm -rf "$STAGING_DIR"' EXIT
 curl --fail --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 \
   "https://downloads.getfiddler.com/linux/latest-linux.yml" -o "$MANIFEST"
 VERSION=$(awk -F': ' '$1 == "version" {print $2; exit}' "$MANIFEST")
@@ -436,18 +438,19 @@ if [ "$(wc -c < "$EXPECTED_DIGEST" | tr -d '[:space:]')" != "64" ] || \
   exit 1
 fi
 
-mkdir -p "$HOME/Downloads"
 APPIMAGE="$HOME/Downloads/$ARTIFACT_NAME"
+STAGED_APPIMAGE="$STAGING_DIR/$ARTIFACT_NAME"
 curl --fail --silent --show-error --proto '=https' --proto-redir '=https' \
   --location --max-redirs 1 \
-  "https://agent-downloads.getfiddler.com/linux/$ARTIFACT_NAME" -o "$APPIMAGE"
-openssl dgst -sha512 -binary -out "$ACTUAL_DIGEST" "$APPIMAGE"
+  "https://agent-downloads.getfiddler.com/linux/$ARTIFACT_NAME" -o "$STAGED_APPIMAGE"
+openssl dgst -sha512 -binary -out "$ACTUAL_DIGEST" "$STAGED_APPIMAGE"
 ACTUAL_SHA512=$(openssl base64 -A -in "$ACTUAL_DIGEST")
 if [ "$ACTUAL_SHA512" != "$EXPECTED_SHA512" ]; then
   echo "AppImage integrity verification failed" >&2
   exit 1
 fi
-chmod +x "$APPIMAGE"
+chmod +x "$STAGED_APPIMAGE"
+mv -f "$STAGED_APPIMAGE" "$APPIMAGE"
 "$APPIMAGE" &
 ```
 
@@ -520,6 +523,7 @@ installation, and cleanup in one PowerShell command:
 
     $installerPath = Join-Path $stagingDir "FiddlerEverywhere.exe"
     $downloadUri = [Uri]"https://agent-downloads.getfiddler.com/win/Fiddler%20Everywhere%20$VERSION.exe"
+    Add-Type -AssemblyName System.Net.Http -ErrorAction Stop
     $handler = [System.Net.Http.HttpClientHandler]::new()
     $handler.AllowAutoRedirect = $false
     $client = [System.Net.Http.HttpClient]::new($handler)
