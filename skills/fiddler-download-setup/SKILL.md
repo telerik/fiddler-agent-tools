@@ -189,6 +189,10 @@ Before running, tell the user:
 - If the user accepts, set `EULA_RETRY_DIR` to the retained path printed by the script and `EULA_ACCEPTED=1`, then rerun this block. It reuses the manifest and DMG and rechecks the checksum without downloading them again.
 - If the user declines, stop and remove the retained staging directory.
 
+Run this block from a Bash script file, not stdin. Keep the initial attach's
+`</dev/null` to prevent EULA prompts from consuming script text; collect consent
+through the agent before retrying.
+
 The DMG is mounted read-only at the private temporary mountpoint.
 Any attach failure retains the staging directory and log for diagnosis. Remove the
 retained directory after diagnosis when it is no longer needed.
@@ -212,6 +216,7 @@ if [ "$EULA_ACCEPTED" = "1" ] && [ -z "$EULA_RETRY_DIR" ]; then
 fi
 if [ -n "$EULA_RETRY_DIR" ]; then
   case "$EULA_RETRY_DIR" in
+    "$TMP_ROOT"/fiddler-install.*/*) echo "EULA_RETRY_DIR must be a direct child of the temp root" >&2; exit 1 ;;
     "$TMP_ROOT"/fiddler-install.*) ;;
     *) echo "EULA_RETRY_DIR is not a Fiddler staging directory under the temp root" >&2; exit 1 ;;
   esac
@@ -340,7 +345,7 @@ if [ "$EULA_ACCEPTED" = "1" ]; then
     ATTACH_STATUS=$?
   fi
 else
-  if hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$MOUNT_DIR" "$DMG" 2>&1 | tee "$ATTACH_LOG"; then
+  if hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$MOUNT_DIR" "$DMG" </dev/null 2>&1 | tee "$ATTACH_LOG"; then
     ATTACH_STATUS=0
   else
     ATTACH_STATUS=$?
@@ -700,6 +705,7 @@ Acknowledge and let them know they can download the MCP setup skill later at any
 |-------|----------|
 | macOS DMG checksum, signature, or Gatekeeper check fails | Stop; do not install. Investigate the failed check before retrying. |
 | hdiutil output contains an EULA and attach is canceled | Review the saved EULA log with the user. On acceptance, set `EULA_RETRY_DIR` and `EULA_ACCEPTED=1` and rerun; the script rechecks the retained DMG. On decline, remove the retained staging directory. |
+| Bash syntax error after an EULA prompt | The prompt may have consumed script stdin. Use a Bash script file and keep `</dev/null`; check whether staging was retained before retrying. |
 | The execution environment requests `/Volumes` access | This is a separate permission for mounting, not EULA consent. Explain the request and proceed only with the user's choice. |
 | `hdiutil attach` fails without an EULA section and cancellation marker | Inspect the retained `hdiutil-attach.log`, report the exact error, and stop for diagnosis. Remove retained staging when no longer needed; do not add `sudo`, change mountpoints, re-download, or use verbose mode without supporting evidence. |
 | Windows installer exits with an error or the expected version is not registered | Report the failure and stop; do not launch an older installation or report upgrade success. |
