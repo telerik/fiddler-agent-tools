@@ -21,7 +21,6 @@ Guide the user through downloading, installing, and launching Fiddler Everywhere
 4. Treat downloaded installers as untrusted until they pass the platform verification steps below.
 5. Use HTTPS only and download through the `agent-downloads.getfiddler.com` tracking endpoint. Follow at most one HTTPS redirect, then rely on the platform checksum or signature verification to reject unexpected content.
 6. Diagnose failures from actual output. If output is truncated, inspect its saved file and use exact paths printed by the script; do not recursively search temporary directories. Do not add `sudo`, change mountpoints, re-download, use verbose mode, or kill processes without evidence.
-7. Never accept a license without the user's explicit informed consent. For the observed `hdiutil` EULA prompt, only after the user reviews and accepts may the agent send one `yes` response; never use unbounded `yes` or bypass the prompt.
 
 ---
 
