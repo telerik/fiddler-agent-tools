@@ -17,10 +17,11 @@ Guide the user through downloading, installing, and launching Fiddler Everywhere
 1. This skill is shell-first. Fiddler is not installed yet, so no MCP tools are available.
 2. Resolve the current version from the manifest before constructing any download URL.
    Never hardcode a version number.
-3. On Windows, detect the current terminal. Run PowerShell blocks directly in a PowerShell terminal. Otherwise, save each block to a temporary `.ps1` file and run `powershell.exe -NoProfile -NonInteractive -File "<absolute Windows path to script.ps1>"`. Use a Windows-format path even from Git Bash, and remove the temporary script after execution. Do not wrap multiline scripts in shell quotes; embedded quotes are interpreted differently by each shell.
+3. On Windows, identify the shell from the tool you are using. In PowerShell, run each PowerShell block directly. In Git Bash or another bash-like shell, never run PowerShell syntax directly. Pass each block as one argument using a quoted heredoc inside command substitution, with `pwsh` if `command -v pwsh` succeeds, otherwise `powershell.exe`: `pwsh -NoProfile -NonInteractive -Command "$(cat <<'PS'`, then the script, then `PS` followed by `)"`. Do not use `-Command -` with stdin: multi-line scripts then print no output and exit 0. Do not write script files.
 4. Treat downloaded installers as untrusted until they pass the platform verification steps below.
 5. Use HTTPS only and download through the `agent-downloads.getfiddler.com` tracking endpoint. Follow at most one HTTPS redirect, then rely on the platform checksum or signature verification to reject unexpected content.
-6. Diagnose failures from actual output. If output is truncated, inspect its saved file and use exact paths printed by the script; do not recursively search temporary directories. Do not add `sudo`, change mountpoints, re-download, use verbose mode, or kill processes without evidence.
+6. Wait for each install command to exit. Do not poll, check install status, or run other commands while it runs. A zero exit code means success; a non-zero exit code or an error means failure.
+7. Diagnose failures from actual output. If output is truncated, inspect its saved file and use exact paths printed by the script; do not recursively search temporary directories. Do not add `sudo`, change mountpoints, re-download, use verbose mode, or kill processes without evidence.
 
 ---
 
@@ -188,9 +189,8 @@ Before running, tell the user:
 - If the user accepts, set `EULA_RETRY_DIR` to the retained path printed by the script and `EULA_ACCEPTED=1`, then rerun this block. It reuses the manifest and DMG and rechecks the checksum without downloading them again.
 - If the user declines, stop and remove the retained staging directory.
 
-Run this block from a Bash script file, not stdin. Keep the initial attach's
-`</dev/null` to prevent EULA prompts from consuming script text; collect consent
-through the agent before retrying.
+Keep the initial attach's `</dev/null` to prevent EULA prompts from consuming script text; 
+collect consent through the agent before retrying.
 
 The DMG is mounted read-only at the private temporary mountpoint.
 Any attach failure retains the staging directory and log for diagnosis. Remove the
@@ -463,7 +463,7 @@ echo "Fiddler Everywhere launch log: $LAUNCH_LOG"
 ### Windows (PowerShell)
 
 The tracking endpoint requires a `User-Agent`; the PowerShell command below sets it on
-the download client.
+the download client. Run this block as described in rule 3, and wait for it to exit (rule 6).
 
 Create a new per-user temporary folder, verify its ACL, and keep download, verification,
 installation, and cleanup in one PowerShell command:
@@ -584,7 +584,6 @@ installation, and cleanup in one PowerShell command:
     if ($publisher -ne "Progress Software Corporation") {
       throw "Unexpected installer publisher: $publisher"
     }
-
     $installerProcess = Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait -PassThru -ErrorAction Stop
     if ($installerProcess.ExitCode -ne 0) {
       throw "Fiddler Everywhere installer failed with exit code $($installerProcess.ExitCode)"
@@ -609,8 +608,8 @@ installation, and cleanup in one PowerShell command:
 ## Phase 4 — Launch Fiddler
 
 The macOS app is installed per-user and the Linux AppImage is started in Phase 3. The
-Windows installer also runs in Phase 3, where its exit code and installed version are
-checked before continuing; use these commands to launch the installed app.
+Windows installer also runs in Phase 3. Launch only after the install command exits successfully (rule 6).
+Use these commands to launch the installed app.
 
 macOS:
 ```bash
@@ -715,5 +714,5 @@ Acknowledge and let them know they can download the MCP setup skill later at any
 | Bash syntax error after an EULA prompt | The prompt may have consumed script stdin. Use a Bash script file and keep `</dev/null`; check whether staging was retained before retrying. |
 | The execution environment requests `/Volumes` access | This is a separate permission for mounting, not EULA consent. Explain the request and proceed only with the user's choice. |
 | `hdiutil attach` fails without an EULA section and cancellation marker | Inspect the retained `hdiutil-attach.log`, report the exact error, and stop for diagnosis. Remove retained staging when no longer needed; do not add `sudo`, change mountpoints, re-download, or use verbose mode without supporting evidence. |
-| Windows installer exits with an error or the expected version is not registered | Report the failure and stop; do not launch an older installation or report upgrade success. |
+| Install command exits with an error, or the expected version is not registered | Report the failure and stop; do not launch an older installation or report upgrade success. |
 | Windows EXE blocked by SmartScreen | Right-click → Run as Administrator |
