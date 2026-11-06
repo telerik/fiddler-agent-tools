@@ -29,12 +29,22 @@ inspection, status, and session APIs.
 
 **macOS:**
 ```bash
-if [ -d "/Applications/Fiddler Everywhere.app" ]; then echo "INSTALLED"; else echo "NOT_INSTALLED"; fi
+if [ -d "$HOME/Applications/Fiddler Everywhere.app" ] || \
+   [ -d "/Applications/Fiddler Everywhere.app" ]; then
+  echo "INSTALLED"
+else
+  echo "NOT_INSTALLED"
+fi
 ```
 
 **Linux:**
 ```bash
-if command -v fiddler-everywhere &>/dev/null; then echo "INSTALLED"; else echo "NOT_INSTALLED"; fi
+APPIMAGE=$(ls ~/Downloads/fiddler-everywhere-*.AppImage 2>/dev/null | sort -V | tail -1)
+if command -v fiddler-everywhere &>/dev/null || [ -n "$APPIMAGE" ]; then
+  echo "INSTALLED"
+else
+  echo "NOT_INSTALLED"
+fi
 ```
 
 **Windows (PowerShell):**
@@ -158,7 +168,16 @@ open -a "Fiddler Everywhere" && sleep 15
 
 Linux:
 ```bash
-(nohup fiddler-everywhere &>/dev/null &); sleep 15
+APPIMAGE=$(ls ~/Downloads/fiddler-everywhere-*.AppImage 2>/dev/null | sort -V | tail -1)
+if command -v fiddler-everywhere &>/dev/null; then
+  (nohup fiddler-everywhere &>/dev/null &)
+elif [ -n "$APPIMAGE" ]; then
+  (nohup "$APPIMAGE" &>/dev/null &)
+else
+  echo "Could not find Fiddler Everywhere executable or AppImage" >&2
+  exit 1
+fi
+sleep 15
 ```
 
 Windows:
